@@ -1,0 +1,202 @@
+/* ── Global reset & design tokens ────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  --bg-base: #0a0c12;
+  --bg-surface: #111318;
+  --bg-elevated: #1a1d26;
+  --bg-overlay: #21252f;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --text-main: rgba(255, 255, 255, 0.87);
+  --text-dim: rgba(255, 255, 255, 0.45);
+
+  --color-primary: #4ecdc4;
+  --color-accent: #ff6b6b;
+  --color-dim: rgba(255, 255, 255, 0.45);
+  --color-muted: rgba(255, 255, 255, 0.24);
+
+  /* category palette */
+  --cat-viral: #4ecdc4;
+  --cat-melanocyte: #ff6b6b;
+  --cat-cancer: #c44569;
+  --cat-autoimmune: #574b90;
+  --cat-bacterial: #f8a5c2;
+  --cat-neurodegeneration: #f78fb3;
+  --cat-reactive: #fd9644;
+  --cat-other: #778ca3;
+  --cat-unknown: #3a3e4a;
+}
+
+[data-theme='light'] {
+  --bg-base: #f0f2f5;
+  --bg-surface: #ffffff;
+  --bg-elevated: #ffffff;
+  --bg-overlay: #ffffff;
+  --border: rgba(0, 0, 0, 0.06);
+  --border-strong: rgba(0, 0, 0, 0.12);
+  --text-main: rgba(0, 0, 0, 0.85);
+  --text-dim: rgba(0, 0, 0, 0.45);
+
+  --color-primary: #1677ff;
+  /* classic ant light primary or keep the teal? user said light theme, let's keep the teal for brand consistency or use a slightly darker version */
+  --color-primary: #38b2ac;
+  --color-accent: #e53e3e;
+  --color-dim: rgba(0, 0, 0, 0.45);
+  --color-muted: rgba(0, 0, 0, 0.1);
+
+  /* light theme category palette — slightly deeper for readability */
+  --cat-viral: #2c7a7b;
+  --cat-melanocyte: #c53030;
+  --cat-cancer: #9b2c2c;
+  --cat-autoimmune: #44337a;
+  --cat-bacterial: #b83280;
+  --cat-neurodegeneration: #d53f8c;
+  --cat-reactive: #c05621;
+  --cat-other: #4a5568;
+  --cat-unknown: #a0aec0;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--bg-base);
+  color: var(--text-main);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* ── Scrollbars ──────────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* ── Ant overrides ───────────────────────────────────────────────────────── */
+.ant-layout {
+  background: var(--bg-base) !important;
+}
+
+.ant-layout-sider {
+  border-right: 1px solid var(--border) !important;
+}
+
+.ant-layout-sider-children {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.ant-collapse {
+  background: transparent !important;
+}
+
+.ant-collapse-header {
+  padding: 10px 14px !important;
+}
+
+.ant-collapse-content-box {
+  padding: 0 14px 12px !important;
+}
+
+.ant-badge-status-dot {
+  width: 8px !important;
+  height: 8px !important;
+}
+
+/* ── Typewriter animation for agent log ──────────────────────────────────── */
+@keyframes blink {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0;
+  }
+}
+
+.cursor-blink {
+  display: inline-block;
+  width: 7px;
+  height: 14px;
+  background: var(--color-primary);
+  vertical-align: text-bottom;
+  margin-left: 2px;
+  animation: blink 1s step-end infinite;
+}
+
+/* ── Fade-in for log lines ───────────────────────────────────────────────── */
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.log-line {
+  animation: fadeSlideIn 0.2s ease both;
+}
+
+/* ── Glow pulse for active state ─────────────────────────────────────────── */
+@keyframes glowPulse {
+
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(78, 205, 196, 0);
+  }
+
+  50% {
+    box-shadow: 0 0 16px 2px rgba(78, 205, 196, 0.25);
+  }
+}
+
+.glow-active {
+  animation: glowPulse 2s ease infinite;
+}
+
+/* ── Panel transitions ───────────────────────────────────────────────────── */
+.detail-panel-overlay {
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: -10px 0 30px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(12px);
+}
+
+.clause-markdown p {
+  margin-top: 0;
+  margin-bottom: 0.7em;
+}
+
+.clause-markdown strong {
+  color: #fff;
+}
