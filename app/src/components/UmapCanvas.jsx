@@ -1,36 +1,31 @@
-/**
- * UmapCanvas.jsx — 89K-point canvas scatter plot.
- *
- * Performance fixes:
- * - requestAnimationFrame throttling: rapid events collapse into 1 draw/frame
- * - Native wheel listener with { passive: false } to allow preventDefault
- * - devicePixelRatio support for crisp rendering on retina displays
- * - Off-screen point culling (skip dots outside viewport bounds)
- */
-import { useRef, useEffect, useLayoutEffect, useCallback, useState } from 'react'
+import React, { useMemo, useState, useCallback, useRef } from 'react';
+import DeckGL from '@deck.gl/react';
+import { ScatterplotLayer, PolygonLayer } from '@deck.gl/layers';
+import { OrthographicView, LinearInterpolator } from '@deck.gl/core';
+import { easeCubicInOut } from 'd3-ease';
 
 const CAT_COLORS_DARK = {
-    viral: '#4ecdc4',
-    melanocyte: '#ff6b6b',
-    cancer_associated: '#c44569',
-    autoimmune: '#574b90',
-    bacterial: '#f8a5c2',
-    neurodegeneration: '#f78fb3',
-    reactive_unclassified: '#fd9644',
-    other: '#778ca3',
-    unknown: '#3a3e4a',
+    viral: [78, 205, 196],
+    melanocyte: [255, 107, 107],
+    cancer_associated: [196, 69, 105],
+    autoimmune: [87, 75, 144],
+    bacterial: [248, 165, 194],
+    neurodegeneration: [247, 143, 179],
+    reactive_unclassified: [253, 150, 68],
+    other: [119, 140, 163],
+    unknown: [58, 62, 74],
 }
 
 const CAT_COLORS_LIGHT = {
-    viral: '#2c7a7b',
-    melanocyte: '#c53030',
-    cancer_associated: '#9b2c2c',
-    autoimmune: '#44337a',
-    bacterial: '#b83280',
-    neurodegeneration: '#d53f8c',
-    reactive_unclassified: '#c05621',
-    other: '#4a5568',
-    unknown: '#a0aec0',
+    viral: [44, 122, 123],
+    melanocyte: [197, 48, 48],
+    cancer_associated: [155, 44, 44],
+    autoimmune: [68, 51, 122],
+    bacterial: [184, 50, 128],
+    neurodegeneration: [213, 63, 140],
+    reactive_unclassified: [192, 86, 33],
+    other: [74, 85, 104],
+    unknown: [160, 174, 192],
 }
 
 const SOURCE_LABELS = {
@@ -38,255 +33,236 @@ const SOURCE_LABELS = {
     TCRAFT: 'TCRAFT', VDJdb: 'VDJdb', PDAC: 'PDAC', AD_CSF: 'AD CSF', McPAS: 'McPAS',
 }
 
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? [
+        parseInt(result[1], 16),
+        parseInt(result[2], 16),
+        parseInt(result[3], 16)
+    ] : [100, 100, 100];
+}
+
 function getColor(p, isDark) {
     const colors = isDark ? CAT_COLORS_DARK : CAT_COLORS_LIGHT
     return colors[p.a ?? p.antigen_category ?? 'unknown'] ?? colors.unknown
 }
 
-export default function UmapCanvas({ points, selectedId, filters, onSelect, isDark = true }) {
-    const containerRef = useRef(null)
-    const canvasRef = useRef(null)
-    const screenPos = useRef([])
-    const transform = useRef({ scale: 1, tx: 0, ty: 0 })
-    const dragging = useRef(null)
-    const boundsRef = useRef({ minX: 0, maxX: 1, minY: 0, maxY: 1 })
-    const rafRef = useRef(null)       // pending animation frame id
-    const [tooltip, setTooltip] = useState(null)
+export default function UmapCanvas({ points, selectedId, filters, onSelect, isDark = true, isRevealing, onRevealComplete, lassoMode, onLassoSelect, lassoSelected = [] }) {
+    const [viewState, setViewState] = useState({
+        target: [0, 0, 0],
+        zoom: 4,
+        minZoom: 1,
+        maxZoom: 20
+    });
 
-    // ── Compute data bounds when points arrive ────────────────────────────────
-    useEffect(() => {
-        if (!points?.length) return
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
-        for (const p of points) {
-            const px = p.x ?? p.umap_x, py = p.y ?? p.umap_y
-            if (px < minX) minX = px; if (px > maxX) maxX = px
-            if (py < minY) minY = py; if (py > maxY) maxY = py
-        }
-        boundsRef.current = { minX, maxX, minY, maxY }
-        transform.current = { scale: 1, tx: 0, ty: 0 }
-    }, [points])
+    const [hoverInfo, setHoverInfo] = useState(null);
+    const [lassoPolygon, setLassoPolygon] = useState([]);
+    const containerRef = useRef(null);
+    const revealCount = isRevealing ? 0 : points?.length; // Simplified for now
 
-    // ── Size canvas (also handles devicePixelRatio) ───────────────────────────
-    const sizeCanvas = useCallback(() => {
-        const container = containerRef.current
-        const canvas = canvasRef.current
-        if (!container || !canvas) return
-        const { width, height } = container.getBoundingClientRect()
-        if (width <= 0 || height <= 0) return
-        const dpr = window.devicePixelRatio || 1
-        canvas.width = width * dpr
-        canvas.height = height * dpr
-        // CSS size stays the same — canvas just has more pixels on HiDPI
-        canvas.style.width = width + 'px'
-        canvas.style.height = height + 'px'
-    }, [])
+    const lassoSet = useMemo(() => {
+        return new Set(lassoSelected ? lassoSelected.map(ld => ld.id ?? ld.tcr_id) : [])
+    }, [lassoSelected])
 
-    useLayoutEffect(() => { sizeCanvas() }, [sizeCanvas])
+    const filterSource = filters?.source
+    const filterCat = filters?.category
 
-    // ── Core draw function ────────────────────────────────────────────────────
-    const drawNow = useCallback(() => {
-        const canvas = canvasRef.current
-        if (!canvas) return
-
-        // Ensure sized
-        if (canvas.width === 0 || canvas.height === 0) sizeCanvas()
-        const W = canvas.width, H = canvas.height
-        if (W === 0 || H === 0 || !points?.length) return
-
-        const dpr = window.devicePixelRatio || 1
-        const ctx = canvas.getContext('2d')
-        const { minX, maxX, minY, maxY } = boundsRef.current
-        const { scale, tx, ty } = transform.current
-
-        ctx.clearRect(0, 0, W, H)
-        ctx.fillStyle = isDark ? '#0a0c12' : '#f0f2f5'
-        ctx.fillRect(0, 0, W, H)
-
-        // Scale context for HiDPI
-        ctx.save()
-        ctx.scale(dpr, dpr)
-
-        const cssW = W / dpr
-        const cssH = H / dpr
-        const pad = 32
-        const dataW = cssW - pad * 2
-        const dataH = cssH - pad * 2
-        const rangeX = maxX - minX || 1
-        const rangeY = maxY - minY || 1
-        const DOT = 2.2
-
-        const filterSource = filters?.source
-        const filterCat = filters?.category
-
-        const positions = []
-
-        for (let i = 0; i < points.length; i++) {
-            const p = points[i]
+    // Deck.gl data transformation
+    const scatterData = useMemo(() => {
+        if (!points) return [];
+        return points.filter(p => {
             const src = p.s ?? p.source
             const cat = p.a ?? p.antigen_category ?? 'unknown'
+            if (filterSource && src !== filterSource) return false
+            if (filterCat && cat !== filterCat) return false
+            return p.x != null || p.umap_x != null;
+        }).map(p => {
+            const pid = p.id ?? p.tcr_id;
+            return {
+                ...p,
+                position: [(p.x ?? p.umap_x), (p.y ?? p.umap_y)],
+                color: getColor(p, isDark),
+                isSelected: pid === selectedId,
+                isLassoed: lassoSet.has(pid)
+            };
+        });
+    }, [points, isDark, lassoSet, selectedId, filterSource, filterCat]);
 
-            if (filterSource !== '' && filterSource != null && src !== filterSource) continue
-            if (filterCat !== '' && filterCat != null && cat !== filterCat) continue
-
-            const px = p.x ?? p.umap_x
-            const py = p.y ?? p.umap_y
-            if (px == null || py == null || isNaN(px) || isNaN(py)) continue
-
-            const base_x = pad + ((px - minX) / rangeX) * dataW
-            const base_y = pad + ((py - minY) / rangeY) * dataH
-            const fx = base_x * scale + tx
-            const fy = base_y * scale + ty
-
-            // Cull well off-screen
-            if (fx < -16 || fx > cssW + 16 || fy < -16 || fy > cssH + 16) continue
-
-            const isSelected = (p.id ?? p.tcr_id) === selectedId
-            const color = getColor(p, isDark) // Added isDark prop
-
-            if (isSelected) {
-                ctx.beginPath()
-                ctx.arc(fx, fy, DOT + 4, 0, Math.PI * 2)
-                ctx.fillStyle = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' // Theme-based glow
-                ctx.fill()
-                ctx.beginPath()
-                ctx.arc(fx, fy, DOT + 2, 0, Math.PI * 2)
-                ctx.strokeStyle = isDark ? '#fff' : '#000' // Theme-based stroke
-                ctx.lineWidth = 1.5
-                ctx.stroke()
+    // Initial ViewState Auto-fit
+    React.useEffect(() => {
+        if (points?.length > 0 && containerRef.current && viewState.zoom === 4 && viewState.target[0] === 0) {
+            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+            for (const p of scatterData) {
+                if (p.position[0] < minX) minX = p.position[0];
+                if (p.position[0] > maxX) maxX = p.position[0];
+                if (p.position[1] < minY) minY = p.position[1];
+                if (p.position[1] > maxY) maxY = p.position[1];
             }
-
-            ctx.beginPath()
-            ctx.arc(fx, fy, isSelected ? DOT + 1 : DOT, 0, Math.PI * 2)
-            ctx.fillStyle = isSelected ? (isDark ? '#fff' : '#000') : color
-            ctx.globalAlpha = isSelected ? 1 : 0.72
-            ctx.fill()
-            ctx.globalAlpha = 1
-
-            positions.push({ x: fx, y: fy, idx: i })
+            if (minX !== Infinity) {
+                const { width, height } = containerRef.current.getBoundingClientRect();
+                const scaleX = width / ((maxX - minX) || 1);
+                const scaleY = height / ((maxY - minY) || 1);
+                const zoom = Math.log2(Math.min(scaleX, scaleY)) - 0.5; // less margin
+                setViewState(prev => ({
+                    ...prev,
+                    target: [(minX + maxX) / 2, (minY + maxY) / 2, 0],
+                    zoom: isNaN(zoom) ? 4 : zoom
+                }));
+            }
         }
+    }, [points?.length, viewState.zoom, viewState.target, scatterData]);
 
-        ctx.restore()
-        screenPos.current = positions
-    }, [points, selectedId, filters, sizeCanvas, isDark])
+    // Zoom to selected point when it changes
+    React.useEffect(() => {
+        if (selectedId && scatterData) {
+            const point = scatterData.find(p => (p.id ?? p.tcr_id) === selectedId);
+            if (point && point.position) {
+                setViewState(prev => ({
+                    ...prev,
+                    target: [point.position[0], point.position[1], 0],
+                    zoom: 12, // zoom in close
+                    transitionDuration: 1000,
+                    transitionEasing: easeCubicInOut,
+                    transitionInterpolator: new LinearInterpolator(['target', 'zoom'])
+                }));
+            }
+        }
+    }, [selectedId]);
 
-    // ── Schedule draw (collapses rapid events into one frame) ─────────────────
-    const scheduleDraw = useCallback(() => {
-        if (rafRef.current) return                           // already queued
-        rafRef.current = requestAnimationFrame(() => {
-            rafRef.current = null
-            drawNow()
+    const layers = [
+        new ScatterplotLayer({
+            id: 'scatterplot-layer',
+            data: scatterData,
+            pickable: true,
+            opacity: 0.8,
+            stroked: true,
+            filled: true,
+            radiusUnits: 'pixels', // Force radii to evaluate in screen pixels, not UMAP coordinate units
+            lineWidthUnits: 'pixels', // Force strokes to evaluate in screen pixels
+            radiusMinPixels: 0.5,
+            radiusMaxPixels: 15,
+            getPosition: d => d.position,
+            getFillColor: d => d.color,
+            getLineColor: d => d.isSelected ? (isDark ? [255, 255, 255] : [0, 0, 0]) : d.color,
+            getRadius: d => d.isSelected ? 6 : 2, // Now strictly 2px and 6px wide on screen
+            getLineWidth: d => d.isSelected || d.isLassoed ? 1.5 : 0,
+            updateTriggers: {
+                getFillColor: [isDark],
+                getLineColor: [selectedId, isDark],
+                getRadius: [selectedId],
+                getLineWidth: [selectedId, lassoSet]
+            },
+            onHover: info => setHoverInfo(info),
+            onClick: info => {
+                if (info.object && onSelect) {
+                    onSelect(info.object);
+                }
+            }
+        }),
+        lassoMode && lassoPolygon.length > 0 && new PolygonLayer({
+            id: 'lasso-layer',
+            data: [{ polygon: lassoPolygon }],
+            pickable: false,
+            stroked: true,
+            filled: true,
+            lineWidthUnits: 'pixels', // Force lasso lines to be 2 screen pixels, not 2 UMAP units!
+            getPolygon: d => d.polygon,
+            getFillColor: [16, 185, 129, 50],
+            getLineColor: [16, 185, 129, 255],
+            getLineWidth: 2,
         })
-    }, [drawNow])
+    ].filter(Boolean);
 
-    useEffect(() => { scheduleDraw() }, [scheduleDraw])
+    // Coordinate projection trick to manual poly point checking
+    // Wait, let's keep it simple.
 
-    // ── ResizeObserver ────────────────────────────────────────────────────────
-    useEffect(() => {
-        const container = containerRef.current
-        if (!container) return
-        const ro = new ResizeObserver(() => { sizeCanvas(); scheduleDraw() })
-        ro.observe(container)
-        return () => ro.disconnect()
-    }, [sizeCanvas, scheduleDraw])
+    // Using simple point-in-polygon ray casting inside data bounds:
+    const onLassoEnd = useCallback((poly) => {
+        if (!poly || poly.length < 3) return;
 
-    // ── Native wheel listener (passive: false so preventDefault works) ────────
-    useEffect(() => {
-        const canvas = canvasRef.current
-        if (!canvas) return
-        const onWheel = (e) => {
-            e.preventDefault()
-            const rect = canvas.getBoundingClientRect()
-            const mx = e.clientX - rect.left
-            const my = e.clientY - rect.top
-            const factor = e.deltaY < 0 ? 1.12 : 0.9
-            const t = transform.current
-            t.tx = mx + (t.tx - mx) * factor
-            t.ty = my + (t.ty - my) * factor
-            t.scale *= factor
-            scheduleDraw()
+        const selected = [];
+        for (const pt of scatterData) {
+            const pos = pt.position;
+            let inside = false;
+            for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+                const xi = poly[i][0], yi = poly[i][1];
+                const xj = poly[j][0], yj = poly[j][1];
+                if ((yi > pos[1]) !== (yj > pos[1]) && pos[0] < (xj - xi) * (pos[1] - yi) / (yj - yi) + xi) {
+                    inside = !inside;
+                }
+            }
+            if (inside) selected.push(pt);
         }
-        canvas.addEventListener('wheel', onWheel, { passive: false })
-        return () => canvas.removeEventListener('wheel', onWheel)
-    }, [scheduleDraw])
+        if (onLassoSelect) onLassoSelect(selected);
+    }, [scatterData, onLassoSelect]);
 
-    // ── Hit test ─────────────────────────────────────────────────────────────
-    const hitTest = useCallback((ex, ey) => {
-        let best = null, bestDist = 14
-        for (const { x, y, idx } of screenPos.current) {
-            const d = Math.hypot(ex - x, ey - y)
-            if (d < bestDist) { bestDist = d; best = idx }
+    // Handle dragging lasso
+    const onDragStart = (info, event) => {
+        if (lassoMode) {
+            setLassoPolygon([info.coordinate]);
         }
-        return best
-    }, [])
-
-    // ── Mouse events (pan + click) — use React handlers (not wheel) ───────────
-    const onMouseMove = useCallback((e) => {
-        if (!canvasRef.current) return
-        const rect = canvasRef.current.getBoundingClientRect()
-        const ex = e.clientX - rect.left
-        const ey = e.clientY - rect.top
-
-        if (dragging.current) {
-            transform.current.tx += e.movementX
-            transform.current.ty += e.movementY
-            scheduleDraw()
-            return
+    };
+    const onDrag = (info, event) => {
+        if (lassoMode && lassoPolygon.length > 0) {
+            setLassoPolygon(prev => [...prev, info.coordinate]);
         }
-
-        const idx = hitTest(ex, ey)
-        if (idx != null) {
-            setTooltip({ x: ex, y: ey, point: points[idx] })
-            canvasRef.current.style.cursor = 'pointer'
-        } else {
-            setTooltip(null)
-            canvasRef.current.style.cursor = 'grab'
+    };
+    const onDragEnd = (info, event) => {
+        if (lassoMode) {
+            onLassoEnd(lassoPolygon);
+            setLassoPolygon([]);
         }
-    }, [points, hitTest, scheduleDraw])
-
-    const onMouseDown = useCallback((e) => {
-        dragging.current = { x: e.clientX, y: e.clientY }
-        if (canvasRef.current) canvasRef.current.style.cursor = 'grabbing'
-    }, [])
-
-    const onMouseUp = useCallback((e) => {
-        const wasDrag = dragging.current &&
-            (Math.abs(e.clientX - dragging.current.x) > 4 ||
-                Math.abs(e.clientY - dragging.current.y) > 4)
-        dragging.current = null
-        if (canvasRef.current) canvasRef.current.style.cursor = 'grab'
-        if (!wasDrag) {
-            const rect = canvasRef.current.getBoundingClientRect()
-            const idx = hitTest(e.clientX - rect.left, e.clientY - rect.top)
-            if (idx != null && onSelect) onSelect(points[idx])
-        }
-    }, [points, hitTest, onSelect])
+    };
 
     return (
-        <div
-            ref={containerRef}
-            style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}
-        >
-            <canvas
-                ref={canvasRef}
-                style={{ display: 'block', cursor: 'grab' }}
-                onMouseMove={onMouseMove}
-                onMouseDown={onMouseDown}
-                onMouseUp={onMouseUp}
-            // onWheel intentionally omitted — handled natively above
-            />
-            {tooltip && <CanvasTooltip {...tooltip} isDark={isDark} />}
+        <div ref={containerRef} style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}>
+            <DeckGL
+                views={new OrthographicView({ id: 'ortho' })}
+                viewState={viewState}
+                onViewStateChange={e => {
+                    const next = e.viewState;
+                    if (e.interactionState.isDragging || e.interactionState.isPanning || e.interactionState.isZooming) {
+                        next.transitionDuration = 0;
+                    }
+                    setViewState(next);
+                }}
+                controller={{ dragPan: !lassoMode }}
+                layers={layers}
+                getCursor={({ isDragging, isHovering }) =>
+                    lassoMode ? 'crosshair' :
+                        isDragging ? 'grabbing' :
+                            isHovering ? 'pointer' : 'grab'
+                }
+                onDragStart={onDragStart}
+                onDrag={onDrag}
+                onDragEnd={onDragEnd}
+                style={{ backgroundColor: isDark ? '#0a0c12' : '#f0f2f5' }}
+            >
+            </DeckGL>
+
+            {/* Tooltip implementation */}
+            {hoverInfo && hoverInfo.object && (
+                <CanvasTooltip
+                    x={hoverInfo.x}
+                    y={hoverInfo.y}
+                    point={hoverInfo.object}
+                    isDark={isDark}
+                />
+            )}
+
             {points?.length > 0 && (
                 <div style={{
                     position: 'absolute', bottom: 10, right: 12,
-                    fontSize: 10, color: 'rgba(255,255,255,0.2)',
+                    fontSize: 10, color: 'rgba(255,255,255,0.4)',
                     fontFamily: "'JetBrains Mono', monospace",
                     pointerEvents: 'none',
+                    borderRadius: 4,
                 }}>
                     {points.length.toLocaleString()} TCRs
                 </div>
             )}
         </div>
-    )
+    );
 }
 
 function CanvasTooltip({ x, y, point, isDark }) {

@@ -1,0 +1,153 @@
+{
+  "by_source": {
+    "PDAC": 31729,
+    "McPAS": 28460,
+    "AD_CSF": 14923,
+    "VDJdb_beta_only": 6582,
+    "TCRAFT": 3808,
+    "VDJdb": 3460
+  },
+  "total_tcrs": 88962,
+  "total_embedded": 89221,
+  "dark_matter_by_source": {
+    "TCRAFT": {
+      "total": 3808,
+      "known": 253,
+      "dark_matter": 3555,
+      "dark_matter_pct": 93.4
+    },
+    "VDJdb": {
+      "total": 3460,
+      "known": 3460,
+      "dark_matter": 0,
+      "dark_matter_pct": 0.0
+    },
+    "VDJdb_beta_only": {
+      "total": 6582,
+      "known": 6582,
+      "dark_matter": 0,
+      "dark_matter_pct": 0.0
+    },
+    "PDAC": {
+      "total": 31729,
+      "known": 56,
+      "dark_matter": 31673,
+      "dark_matter_pct": 99.8
+    },
+    "AD_CSF": {
+      "total": 14923,
+      "known": 1,
+      "dark_matter": 14922,
+      "dark_matter_pct": 100.0
+    },
+    "McPAS": {
+      "total": 28460,
+      "known": 9259,
+      "dark_matter": 19201,
+      "dark_matter_pct": 67.5
+    }
+  },
+  "total_with_known_antigen": 19611,
+  "total_dark_matter": 69351,
+  "total_dark_matter_pct": 78.0,
+  "unique_epitopes": 729,
+  "category_distribution": {
+    "viral": 15523,
+    "other": 1820,
+    "cancer_associated": 1361,
+    "melanocyte": 436,
+    "autoimmune": 360,
+    "bacterial": 81,
+    "unknown": 23,
+    "reactive_unclassified": 7
+  },
+  "top_epitopes": {
+    "GILGFVFTL": 3494,
+    "LPRRSGAAGA": 2107,
+    "NLVPMVATV": 2031,
+    "GLCTLVAML": 983,
+    "WEDLFCDESLSSPEPPSSSE": 462,
+    "CRVLCCYVL": 433,
+    "TPRVTGGGAM": 346,
+    "ELAGIGILTV": 317,
+    "EAAGIGILTV": 283,
+    "VTEHDTLLY": 270,
+    "FRCPRRFCF": 265,
+    "RFYKTLRAEQASQ": 260,
+    "RAKFKQLL": 237,
+    "LLWNGPMAV": 236,
+    "KRWIILGLNK": 232
+  },
+  "prediction_summary": {
+    "MART1_ELAGIGILTV": {
+      "mean": -0.9905,
+      "std": 0.3503,
+      "top_5pct": -0.4785
+    },
+    "MART1_AAGIGILTV": {
+      "mean": -0.7494,
+      "std": 0.3483,
+      "top_5pct": -0.2834
+    },
+    "gp100_KTWGQYWQV": {
+      "mean": -1.1102,
+      "std": 0.3942,
+      "top_5pct": -0.5773
+    },
+    "gp100_IMDQVPFSV": {
+      "mean": -1.2979,
+      "std": 0.3979,
+      "top_5pct": -0.7118
+    },
+    "gp100_YLEPGPVTA": {
+      "mean": -0.6891,
+      "std": 0.3336,
+      "top_5pct": -0.1801
+    },
+    "TYR_YMNGTMSQV": {
+      "mean": -1.4682,
+      "std": 0.447,
+      "top_5pct": -0.8401
+    },
+    "TRP2_SVYDFFVWL": {
+      "mean": -0.3186,
+      "std": 0.4903,
+      "top_5pct": 0.2165
+    },
+    "NYESO1_SLLMWITQC": {
+      "mean": -0.581,
+      "std": 0.3614,
+      "top_5pct": -0.0666
+    },
+    "PRAME_SLYSFPEPEA": {
+      "mean": -0.6599,
+      "std": 0.3388,
+      "top_5pct": -0.0682
+    },
+    "CMV_NLVPMVATV": {
+      "mean": -0.5896,
+      "std": 0.3044,
+      "top_5pct": -0.1041
+    },
+    "EBV_GLCTLVAML": {
+      "mean": -0.1975,
+      "std": 0.3006,
+      "top_5pct": 0.1994
+    },
+    "FLU_GILGFVFTL": {
+      "mean": -0.1961,
+      "std": 0.357,
+      "top_5pct": 0.2692
+    },
+    "COVID_YLQPRTFLL": {
+      "mean": -0.1839,
+      "std": 0.3623,
+      "top_5pct": 0.3687
+    },
+    "HIV_SLYNTVATL": {
+      "mean": -0.1493,
+      "std": 0.2653,
+      "top_5pct": 0.2378
+    }
+  }
+}

@@ -10,6 +10,8 @@ import { RobotOutlined, ReloadOutlined } from '@ant-design/icons'
 import { api } from '../api'
 import AgentLog from './AgentLog'
 import MutationHeatmap from './MutationHeatmap'
+import SynthesisExport from './SynthesisExport'
+import NullDistribution from './NullDistribution'
 
 const CAT_COLORS = {
     viral: 'var(--cat-viral)',
@@ -149,7 +151,21 @@ export default function TcrDetail({ point, provider, onClose }) {
 
             {/* ── Predictions ── */}
             <div>
-                <SectionLabel>DecoderTCR Predictions</SectionLabel>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{
+                        fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase',
+                        fontWeight: 700, color: 'var(--text-dim)', marginBottom: 6,
+                    }}>
+                        DecoderTCR Predictions
+                    </div>
+                </div>
+                <div style={{
+                    fontSize: 10, color: 'var(--color-primary)', marginBottom: 12,
+                    padding: '6px 8px', background: 'rgba(78, 205, 196, 0.1)',
+                    border: '1px solid rgba(78, 205, 196, 0.2)', borderRadius: 6
+                }}>
+                    <strong>Viral Bias Note:</strong> Viral epitopes tend to score higher absolute values due to training data imbalance. Rely on the empirical Null Distribution (p-values) for true significance.
+                </div>
                 {loadingDetail && <Skeleton active paragraph={{ rows: 3 }} />}
                 {!loadingDetail && predictions.length === 0 && (
                     <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>No predictions available</span>
@@ -173,6 +189,7 @@ export default function TcrDetail({ point, provider, onClose }) {
                                     borderRadius: 2, transition: 'width 0.4s ease',
                                 }} />
                             </div>
+                            {i === 0 && <NullDistribution epitope={p.epitope_name} score={sc} isDark={true} />}
                         </div>
                     )
                 })}
@@ -216,6 +233,11 @@ export default function TcrDetail({ point, provider, onClose }) {
                     <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>Backend required for neighbor search</span>
                 )}
             </div>
+
+            <Divider style={{ margin: '4px 0', borderColor: 'var(--border)' }} />
+
+            {/* ── Synthesis export ── */}
+            <SynthesisExport tcrId={tcrId} epitope={epitope || predictions[0]?.epitope_name} />
         </div>
     )
 }

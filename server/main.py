@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.lifespan import lifespan
-from routers import annotate, health, mutagenesis, stats, tcr, umap
+from routers import annotate, health, mutagenesis, stats, tcr, umap, synthesis, null_distribution
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,3 +43,5 @@ app.include_router(tcr.router)
 app.include_router(mutagenesis.router)
 app.include_router(annotate.router)
 app.include_router(stats.router)
+app.include_router(synthesis.router)
+app.include_router(null_distribution.router)

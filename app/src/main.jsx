@@ -1,4 +1,4 @@
-import { StrictMode, createContext, useState, useContext, useEffect, useMemo } from 'react'
+import { createContext, useState, useContext, useEffect, useMemo } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ConfigProvider, theme } from 'antd'
 import './index.css'
@@ -57,9 +57,7 @@ const ThemeProvider = ({ children }) => {
 }
 
 createRoot(document.getElementById('root')).render(
-  <StrictMode>
-    <ThemeProvider>
-      <App />
-    </ThemeProvider>
-  </StrictMode>,
+  <ThemeProvider>
+    <App />
+  </ThemeProvider>
 )

@@ -1,0 +1,270 @@
+{
+  "GatePS_0000": {
+    "tcr_id": "GatePS_0000",
+    "CDR3b": "CASSIVLAGSNEQFF",
+    "source": "Gate_plateseq",
+    "title": "The Dark Matter Poster Child",
+    "steps": [
+      {
+        "step": 1,
+        "action": "EXPLORE",
+        "label": "Loading TCR profile",
+        "detail": "CDR3\u03b2: CASSIVLAGSNEQFF | TRBV19 | TRBJ2-1 | Source: Gate et al. 2020 plate-seq (AD CSF)",
+        "duration_ms": 800
+      },
+      {
+        "step": 2,
+        "action": "EXPLORE",
+        "label": "Checking clonal expansion",
+        "detail": "31 cells from patient AD1 \u2014 34% of ALL CSF T cells. This is extraordinary clonal expansion.",
+        "duration_ms": 1200
+      },
+      {
+        "step": 3,
+        "action": "COMPARE",
+        "label": "Searching ESM-2 nearest neighbors",
+        "detail": "Computing cosine similarity across 89,221 TCR embeddings (1,280 dimensions). 4/10 annotated neighbors are viral, but the base rate for viral in annotated TCRs is 43% \u2014 this is expected, not evidence of viral specificity.",
+        "duration_ms": 2000
+      },
+      {
+        "step": 4,
+        "action": "SCORE",
+        "label": "Checking antigen databases",
+        "detail": "VDJdb: No exact CDR3\u03b2 match. McPAS: No match. TRAIT: No match. This TCR is TRUE dark matter \u2014 its target is completely unknown.",
+        "duration_ms": 1800
+      },
+      {
+        "step": 5,
+        "action": "SCORE",
+        "label": "DecoderTCR binding prediction",
+        "detail": "\u26a0\ufe0f Beta-only chain \u2014 cannot run DecoderTCR (requires paired alpha+beta). This limitation IS the story: the most expanded T cell in AD CSF, and we can't predict what it sees.",
+        "duration_ms": 1000
+      },
+      {
+        "step": 6,
+        "action": "SYNTHESIZE",
+        "label": "Literature context",
+        "detail": "Gate 2020 Nature: clonal CD8+ T cell expansion in AD CSF. Bjornevik 2022 Science: EBV \u2192 32\u00d7 MS risk. Lanz 2022 Nature: EBNA1 mimics GlialCAM. Gate 2021 Science: T cells react to \u03b1-synuclein in Lewy body dementia.",
+        "duration_ms": 2000
+      },
+      {
+        "step": 7,
+        "action": "SYNTHESIZE",
+        "label": "Generating hypothesis",
+        "detail": "A T cell clearly doing something important (34% of CSF!) but target completely unknown. Neighbor annotations are indistinguishable from database background. Could be: CNS autoantigen, viral peptide (EBV?), or stress neoepitope. This is exactly the kind of TCR that needs TCRAFT synthesis (<$1/TCR) and library-on-library screening to solve.",
+        "duration_ms": 2500,
+        "highlight": true
+      }
+    ],
+    "total_duration_ms": 11300
+  },
+  "TCRAFT_2614": {
+    "tcr_id": "TCRAFT_2614",
+    "CDR3b": "CASSQGLAEETQYF",
+    "source": "TCRAFT",
+    "title": "Top Melanocyte-Reactive Candidate",
+    "steps": [
+      {
+        "step": 1,
+        "action": "EXPLORE",
+        "label": "Loading TCR profile",
+        "detail": "CDR3\u03b2: CASSQGLAEETQYF | Source: Gaglione et al. 2026 Immunity (vitiligo skin biopsy). Paired alpha: CALSEGAGGFKTIF.",
+        "duration_ms": 800
+      },
+      {
+        "step": 2,
+        "action": "COMPARE",
+        "label": "Searching ESM-2 nearest neighbors",
+        "detail": "Computing cosine similarity across 89,221 TCR embeddings (1,280 dimensions). 9/10 nearest neighbors are unannotated dark matter \u2014 this region of embedding space is largely unexplored. Cross-disease convergence: similar CDR3 motifs (CASS[x]GL[x]E[x]TQYF) appear in PDAC, AD CSF, and McPAS datasets.",
+        "duration_ms": 2000
+      },
+      {
+        "step": 3,
+        "action": "SCORE",
+        "label": "DecoderTCR panel scoring (14 epitopes)",
+        "detail": "Scoring against melanocyte antigens (TRP-2, MART-1, gp100, TYR), cancer (NY-ESO-1, PRAME), and viral controls (CMV, EBV, Flu, COVID, HIV)...",
+        "duration_ms": 3000
+      },
+      {
+        "step": 4,
+        "action": "SCORE",
+        "label": "Top hit: TRP-2/SVYDFFVWL",
+        "detail": "Score: +0.514 | Null distribution (N=10,000): p=0.0001 | Exceeds ALL 10,000 scrambled CDR3 scores! Specificity: EBV p=0.26 (ns), CMV p=0.22 (ns) \u2014 TRP-2 signal is epitope-specific.",
+        "duration_ms": 1500,
+        "highlight": true
+      },
+      {
+        "step": 5,
+        "action": "COMPARE",
+        "label": "Consistency check: neighborhood \u2194 prediction",
+        "detail": "Neighborhood is mostly dark matter \u2014 no annotated melanocyte neighbors to cross-validate against. However, the cross-disease CDR3 motif convergence (PDAC, AD CSF, McPAS all share this motif) suggests a conserved binding specificity. The primary evidence for TRP-2 binding is the 10K-scramble null distribution (p=0.0001) and epitope specificity controls (EBV/CMV not significant).",
+        "duration_ms": 1500,
+        "highlight": true
+      },
+      {
+        "step": 6,
+        "action": "ENGINEER",
+        "label": "CDR3\u03b2 mutagenesis scan",
+        "detail": "Scoring all 240 single-amino-acid mutations (12 positions \u00d7 20 AAs). Best mutation: S3H (+0.018 delta). Sensitive positions: A1, S2, S3. Modest deltas suggest CDR3 is already near-optimal from in vivo selection.",
+        "duration_ms": 2500
+      },
+      {
+        "step": 7,
+        "action": "SYNTHESIZE",
+        "label": "Biological interpretation",
+        "detail": "TRP-2 is a melanocyte differentiation antigen shared between vitiligo and melanoma. Two strong lines of evidence: (1) DecoderTCR binding score p=0.0001 (10,000 scrambled controls), (2) epitope-specific signal (TRP-2 yes, EBV/CMV no). The CDR3 motif also converges across 3 disease contexts. Ranks #1 of 201 TCRAFT TCRs (99.5th percentile).",
+        "duration_ms": 2000
+      },
+      {
+        "step": 8,
+        "action": "SYNTHESIZE",
+        "label": "Synthesis recommendation",
+        "detail": "High-confidence candidate. TCRAFT pooled synthesis: <$1/TCR. Recommend WT + top 3 mutagenesis variants for experimental validation.",
+        "duration_ms": 1500
+      }
+    ],
+    "total_duration_ms": 14800
+  },
+  "ADCSF_05260": {
+    "tcr_id": "ADCSF_05260",
+    "CDR3b": "CASSLGQAYEQYF",
+    "source": "AD_CSF",
+    "title": "The AD-to-EBV Connection",
+    "steps": [
+      {
+        "step": 1,
+        "action": "EXPLORE",
+        "label": "Loading TCR profile",
+        "detail": "CDR3\u03b2: CASSLGQAYEQYF | Source: Gate et al. 2020 (Alzheimer's CSF) | 14 cells across 3 patients",
+        "duration_ms": 800
+      },
+      {
+        "step": 2,
+        "action": "COMPARE",
+        "label": "Searching ESM-2 nearest neighbors",
+        "detail": "Computing cosine similarity across 89,221 TCR embeddings. 6/10 annotated neighbors are viral \u2014 but with 43% base rate, this is expected for any TCR near VDJdb entries.",
+        "duration_ms": 2000
+      },
+      {
+        "step": 3,
+        "action": "COMPARE",
+        "label": "Cross-reference against VDJdb",
+        "detail": "\ud83c\udfaf EXACT CDR3\u03b2 MATCH in VDJdb: CASSLGQAYEQYF \u2192 EBNA3A/FLRGRAYGL (EBV). This is experimentally validated! The database match is the primary evidence \u2014 the neighbor enrichment is expected for identical sequences.",
+        "duration_ms": 1500,
+        "highlight": true
+      },
+      {
+        "step": 4,
+        "action": "SCORE",
+        "label": "HLA restriction check",
+        "detail": "\u26a0\ufe0f FLRGRAYGL is HLA-B*08:01 restricted, NOT HLA-A*02:01. DecoderTCR binding scores unreliable for this epitope. But the VDJdb CDR3\u03b2 match is HLA-independent evidence.",
+        "duration_ms": 1500
+      },
+      {
+        "step": 5,
+        "action": "SYNTHESIZE",
+        "label": "Literature context: EBV \u2192 neurodegeneration",
+        "detail": "Bjornevik 2022 Science: EBV \u2192 32\u00d7 MS risk. Lanz 2022 Nature: EBNA1 mimics GlialCAM. Gate 2020: EBV-reactive TCRs in AD CSF via GLIPH clustering. Our finding recapitulates Gate 2020 using sequence matching.",
+        "duration_ms": 2000
+      },
+      {
+        "step": 6,
+        "action": "SYNTHESIZE",
+        "label": "Discovery significance",
+        "detail": "We recaptured the Gate 2020 finding via CDR3\u03b2 database matching. An Alzheimer's CSF T cell has the exact same receptor as a known EBV-reactive clone. This extends the EBV\u2192neurodegeneration paradigm and validates our cross-referencing approach.",
+        "duration_ms": 2500
+      }
+    ],
+    "total_duration_ms": 10300
+  },
+  "TCRAFT_0204": {
+    "tcr_id": "TCRAFT_0204",
+    "CDR3b": "CASSQGYEQYF",
+    "source": "TCRAFT",
+    "title": "Vitiligo \u2192 Self-Antigen Connection",
+    "steps": [
+      {
+        "step": 1,
+        "action": "EXPLORE",
+        "label": "Loading TCR profile",
+        "detail": "CDR3\u03b2: CASSQGYEQYF | TRBV11-2 | TRBJ2-7 | Source: Gaglione et al. 2026 Immunity (vitiligo skin biopsy). Has paired alpha chain.",
+        "duration_ms": 800
+      },
+      {
+        "step": 2,
+        "action": "COMPARE",
+        "label": "Searching ESM-2 nearest neighbors",
+        "detail": "Computing cosine similarity across 89,221 TCR embeddings. Neighbors include 2/10 autoimmune-associated TCRs (5% base rate).",
+        "duration_ms": 2000
+      },
+      {
+        "step": 3,
+        "action": "COMPARE",
+        "label": "Cross-reference against VDJdb",
+        "detail": "\ud83c\udfaf EXACT CDR3\u03b2 MATCH in VDJdb: CASSQGYEQYF \u2192 KLFEFLVYGV/SMARCD3 (HLA-A*02:01). This is a SELF-ANTIGEN \u2014 a chromatin remodeling protein expressed in all human cells.",
+        "duration_ms": 1500,
+        "highlight": true
+      },
+      {
+        "step": 4,
+        "action": "SCORE",
+        "label": "Self-antigen implications",
+        "detail": "SMARCD3 (SWI/SNF complex member) is ubiquitously expressed. A T cell in vitiligo skin targeting a self-protein is consistent with autoimmunity \u2014 but SMARCD3 is NOT melanocyte-specific. May represent broader tissue-agnostic autoimmunity.",
+        "duration_ms": 2000
+      },
+      {
+        "step": 5,
+        "action": "SYNTHESIZE",
+        "label": "Reclassification",
+        "detail": "Status change: Dark matter \u2192 Validated self-antigen target. Evidence: exact CDR3\u03b2 match in VDJdb (experimentally validated). The TCRAFT screen missed this because SMARCD3 wasn't in their peptide panel. The agent found it in seconds by database cross-referencing.",
+        "duration_ms": 2000
+      }
+    ],
+    "total_duration_ms": 8300
+  },
+  "PDAC_00561": {
+    "tcr_id": "PDAC_00561",
+    "CDR3b": "CASSSSGSSYNEQFF",
+    "source": "PDAC",
+    "title": "Tumor Bystander Unmasked",
+    "steps": [
+      {
+        "step": 1,
+        "action": "EXPLORE",
+        "label": "Loading TCR profile",
+        "detail": "CDR3\u03b2: CASSSSGSSYNEQFF | Source: Gaglione et al. 2026 Immunity (pancreatic ductal adenocarcinoma TILs). This T cell was inside a pancreatic tumor.",
+        "duration_ms": 800
+      },
+      {
+        "step": 2,
+        "action": "COMPARE",
+        "label": "Searching ESM-2 nearest neighbors",
+        "detail": "Computing cosine similarity across 89,221 TCR embeddings. 5/10 annotated neighbors are viral \u2014 suspicious for a tumor-infiltrating T cell, though consistent with 43% viral base rate.",
+        "duration_ms": 2000
+      },
+      {
+        "step": 3,
+        "action": "COMPARE",
+        "label": "Cross-reference against VDJdb",
+        "detail": "\ud83c\udfaf EXACT CDR3\u03b2 MATCH in VDJdb: CASSSSGSSYNEQFF \u2192 RPIIRPATL/NP (Influenza B). This tumor-infiltrating T cell is flu-reactive! The database match is definitive.",
+        "duration_ms": 1500,
+        "highlight": true
+      },
+      {
+        "step": 4,
+        "action": "SCORE",
+        "label": "Bystander analysis",
+        "detail": "This T cell infiltrated the tumor but wasn't recruited by tumor antigens. It expanded during a prior flu infection and trafficked non-specifically. Bystanders constitute 30-80% of TILs in solid tumors (Simoni 2018 Nature, Scheper 2019 Nature Medicine).",
+        "duration_ms": 2000
+      },
+      {
+        "step": 5,
+        "action": "SYNTHESIZE",
+        "label": "Clinical significance",
+        "detail": "Identifying bystanders is critical for TIL therapy \u2014 expanding flu-specific T cells won't fight cancer. The agent unmasked this via CDR3\u03b2 database matching. Dark matter \u2192 Viral bystander. Filtering bystanders from true tumor-reactive TILs is exactly the kind of problem the TCRAFT screen solves at scale.",
+        "duration_ms": 2000
+      }
+    ],
+    "total_duration_ms": 8300
+  }
+}
