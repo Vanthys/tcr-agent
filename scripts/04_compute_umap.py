@@ -22,6 +22,7 @@ import pandas as pd
 import umap
 from pathlib import Path
 import time
+import joblib
 
 
 def main():
@@ -36,7 +37,7 @@ def main():
     # Auto-detect paths
     script_dir = Path(__file__).resolve().parent
     project_dir = script_dir.parent
-    embed_dir = Path(args.embeddings_dir) if args.embeddings_dir else project_dir / "embeddings"
+    embed_dir = Path(args.embeddings_dir) if args.embeddings_dir else project_dir / "data" / "embeddings"
 
     print("╔══════════════════════════════════════════════════════════════╗")
     print("║  UMAP Projection — TCR CDR3 Beta Embeddings                ║")
@@ -68,10 +69,10 @@ def main():
         min_dist=args.min_dist,
         metric=args.metric,
         random_state=args.random_seed,
-        n_components=2,
+        n_components=5,
         verbose=True,
     )
-    coords_2d = reducer.fit_transform(embeddings)
+    coords_nd = reducer.fit_transform(embeddings)
     t1 = time.time()
     print(f"  UMAP completed in {t1 - t0:.1f}s")
 
@@ -82,8 +83,11 @@ def main():
         'CDR3b': cdr3b,
         'known_epitope': known_epitopes,
         'antigen_category': antigen_categories,
-        'umap_x': coords_2d[:, 0],
-        'umap_y': coords_2d[:, 1],
+        'd1': coords_nd[:, 0],
+        'd2': coords_nd[:, 1],
+        'd3': coords_nd[:, 2],
+        'd4': coords_nd[:, 3],
+        'd5': coords_nd[:, 4],
     })
 
     # Replace empty strings with None for cleaner output
@@ -97,11 +101,19 @@ def main():
 
     # Summary stats
     print(f"\n  Total points: {len(umap_df)}")
-    print(f"  UMAP X range: [{coords_2d[:, 0].min():.2f}, {coords_2d[:, 0].max():.2f}]")
-    print(f"  UMAP Y range: [{coords_2d[:, 1].min():.2f}, {coords_2d[:, 1].max():.2f}]")
+    print(f"  UMAP D1 range: [{coords_nd[:, 0].min():.2f}, {coords_nd[:, 0].max():.2f}]")
+    print(f"  UMAP D2 range: [{coords_nd[:, 1].min():.2f}, {coords_nd[:, 1].max():.2f}]")
 
-    # Save UMAP parameters for reproducibility
-    params_path = embed_dir / "umap_params.json"
+    # Generate a version timestamp
+    timestamp = int(time.time())
+
+    # Save the model so we can run .transform() later for the iterative loop
+    model_path = embed_dir / f"umap_model_v{timestamp}.joblib"
+    joblib.dump(reducer, model_path)
+    print(f"\nSaved UMAP model: {model_path}")
+
+    # Save parameters
+    params_path = embed_dir / f"umap_params_v{timestamp}.json"
     import json
     with open(params_path, 'w') as f:
         json.dump({
@@ -113,6 +125,19 @@ def main():
             'embedding_dim': int(embeddings.shape[1]),
         }, f, indent=2)
     print(f"  Saved UMAP params: {params_path}")
+
+    # Save CSV
+    output_path = embed_dir / f"umap_coords_v{timestamp}.csv"
+    umap_df.to_csv(output_path, index=False)
+    print(f"\nSaved UMAP coordinates: {output_path}")
+
+    # Optionally symlink to 'latest' so scripts can find it easily
+    latest_csv = embed_dir / "umap_coords_latest.csv"
+    latest_model = embed_dir / "umap_model_latest.joblib"
+    
+    # We write a pointer file so both windows/linux can read it simply
+    pointer_path = embed_dir / "umap_latest.txt"
+    pointer_path.write_text(str(timestamp))
 
     print("\n✓ UMAP projection complete!")
 

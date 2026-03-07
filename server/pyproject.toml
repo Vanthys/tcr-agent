@@ -18,6 +18,8 @@ dependencies = [
     "google-genai>=1.65.0",
     "sqlalchemy[asyncio]>=2.0.48",
     "aiosqlite>=0.22.1",
+    "joblib>=1.5.3",
+    "umap-learn>=0.5.11",
 ]
 
 [build-system]

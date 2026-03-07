@@ -52,7 +52,7 @@ def get_umap(
 
         sql = f"""
             SELECT tcr_id AS id,
-                   x, y,
+                   d1, d2, d3, d4, d5,
                    CDR3b AS c,
                    source AS s,
                    known_epitope AS e,
@@ -65,7 +65,7 @@ def get_umap(
         params["limit"] = limit
 
         rows = con.execute(text(sql), params).fetchall()
-        cols = ["id", "x", "y", "c", "s", "e", "a", "h"]
+        cols = ["id", "d1", "d2", "d3", "d4", "d5", "c", "s", "e", "a", "h"]
         result = []
         for row in rows:
             pt = dict(zip(cols, row))
@@ -113,7 +113,7 @@ def stream_umap(
 
             where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
             sql = f"""
-                SELECT tcr_id AS id, x, y, CDR3b AS c, source AS s,
+                SELECT tcr_id AS id, d1, d2, d3, d4, d5, CDR3b AS c, source AS s,
                        known_epitope AS e, COALESCE(antigen_category, 'unknown') AS a,
                        hero AS h
                 FROM umap
@@ -124,7 +124,7 @@ def stream_umap(
 
             # Use server-side cursor equivalent (fetchmany) to stream rows without loading all into RAM
             cursor = con.execute(text(sql), params)
-            cols = ["id", "x", "y", "c", "s", "e", "a", "h"]
+            cols = ["id", "d1", "d2", "d3", "d4", "d5", "c", "s", "e", "a", "h"]
             
             while True:
                 rows = cursor.fetchmany(5000)
@@ -165,7 +165,7 @@ def get_umap_arrow(
 
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
         sql = f"""
-            SELECT tcr_id AS id, x, y, CDR3b AS c, source AS s,
+            SELECT tcr_id AS id, d1, d2, d3, d4, d5, CDR3b AS c, source AS s,
                    known_epitope AS e, COALESCE(antigen_category, 'unknown') AS a,
                    hero AS h
             FROM umap

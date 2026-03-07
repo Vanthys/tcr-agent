@@ -47,7 +47,7 @@ function getColor(p, isDark) {
     return colors[p.a ?? p.antigen_category ?? 'unknown'] ?? colors.unknown
 }
 
-export default function UmapCanvas({ points, selectedId, filters, onSelect, isDark = true, isRevealing, onRevealComplete, lassoMode, onLassoSelect, lassoSelected = [] }) {
+export default function UmapCanvas({ points, selectedId, filters, onSelect, isDark = true, isRevealing, onRevealComplete, lassoMode, onLassoSelect, lassoSelected = [], xDim = 1, yDim = 2 }) {
     const [viewState, setViewState] = useState({
         target: [0, 0, 0],
         zoom: 4,
@@ -75,18 +75,18 @@ export default function UmapCanvas({ points, selectedId, filters, onSelect, isDa
             const cat = p.a ?? p.antigen_category ?? 'unknown'
             if (filterSource && src !== filterSource) return false
             if (filterCat && cat !== filterCat) return false
-            return p.x != null || p.umap_x != null;
+            return p.d1 != null || p.x != null || p.umap_x != null;
         }).map(p => {
             const pid = p.id ?? p.tcr_id;
             return {
                 ...p,
-                position: [(p.x ?? p.umap_x), (p.y ?? p.umap_y)],
+                position: [(p[`d${xDim}`] ?? p.x ?? p.umap_x ?? 0), (p[`d${yDim}`] ?? p.y ?? p.umap_y ?? 0)],
                 color: getColor(p, isDark),
                 isSelected: pid === selectedId,
                 isLassoed: lassoSet.has(pid)
             };
         });
-    }, [points, isDark, lassoSet, selectedId, filterSource, filterCat]);
+    }, [points, isDark, lassoSet, selectedId, filterSource, filterCat, xDim, yDim]);
 
     // Initial ViewState Auto-fit
     React.useEffect(() => {
@@ -112,7 +112,7 @@ export default function UmapCanvas({ points, selectedId, filters, onSelect, isDa
         }
     }, [points?.length, viewState.zoom, viewState.target, scatterData]);
 
-    // Zoom to selected point when it changes
+    // Zoom to selected point when it changes or dimensions change
     React.useEffect(() => {
         if (selectedId && scatterData) {
             const point = scatterData.find(p => (p.id ?? p.tcr_id) === selectedId);
@@ -127,7 +127,7 @@ export default function UmapCanvas({ points, selectedId, filters, onSelect, isDa
                 }));
             }
         }
-    }, [selectedId]);
+    }, [selectedId, xDim, yDim]);
 
     const layers = [
         new ScatterplotLayer({

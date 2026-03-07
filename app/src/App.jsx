@@ -11,7 +11,7 @@
  * Filters live in the top bar over the canvas.
  */
 import { useState, useEffect, useContext, useMemo } from 'react'
-import { Layout, Select, AutoComplete, Badge, Tooltip, Spin, Button, Segmented, Input } from 'antd'
+import { Layout, Select, AutoComplete, Badge, Tooltip, Spin, Button, Segmented, Input, message, Slider } from 'antd'
 import { ThemeContext } from './main'
 import {
   ApiOutlined,
@@ -22,6 +22,7 @@ import {
   PlayCircleOutlined,
   SearchOutlined,
   DragOutlined,
+  SyncOutlined,
 } from '@ant-design/icons'
 import { api } from './api'
 import UmapCanvas from './components/UmapCanvas'
@@ -64,6 +65,9 @@ export default function App() {
   const [searchText, setSearchText] = useState('')
   const [lassoMode, setLassoMode] = useState(false)
   const [lassoSelected, setLassoSelected] = useState([])
+  const [xDim, setXDim] = useState(1)
+  const [yDim, setYDim] = useState(2)
+  const [workerLoading, setWorkerLoading] = useState(false)
 
   // UI state for animated detail panel
   const [panelOpen, setPanelOpen] = useState(false)
@@ -199,6 +203,23 @@ export default function App() {
     setSearchText('')
   }
 
+  const triggerUmapRecompute = async () => {
+    try {
+      setWorkerLoading(true);
+      const res = await fetch('http://localhost:3001/api/worker/umap/compute', { method: 'POST' });
+      if (res.ok) {
+        message.success('UMAP Recomputation Queued! View backend logs for progress.');
+      } else {
+        message.error('Failed to start worker');
+      }
+    } catch (e) {
+      console.error(e);
+      message.error('Error starting worker');
+    } finally {
+      setTimeout(() => setWorkerLoading(false), 2000);
+    }
+  }
+
   return (
     <Layout style={{ height: '100vh', overflow: 'hidden' }}>
       {/* ── Top bar ──────────────────────────────────────────────────────── */}
@@ -212,6 +233,7 @@ export default function App() {
         gap: 20,
         flexShrink: 0,
         zIndex: 10,
+        overflowX: 'auto',
       }}>
         {/* Logo / title */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -293,6 +315,16 @@ export default function App() {
           }}
         />
 
+        <Tooltip title="Trigger Full UMAP Recompute (Async)">
+          <Button
+            type="text"
+            size="small"
+            icon={<SyncOutlined spin={workerLoading} />}
+            onClick={triggerUmapRecompute}
+            style={{ color: 'var(--text-dim)' }}
+          />
+        </Tooltip>
+
         {/* Play Reveal button (Commented out per request)
         <Button
           type="primary"
@@ -306,18 +338,7 @@ export default function App() {
         </Button>
         */}
 
-        <Tooltip title="Lasso Selection">
-          <Button
-            type={lassoMode ? 'primary' : 'text'}
-            size="small"
-            icon={<DragOutlined />}
-            onClick={() => {
-              setLassoMode(!lassoMode)
-              if (lassoMode) setLassoSelected([]) // Clear selection when turning off
-            }}
-            style={lassoMode ? { background: 'var(--color-primary)' } : { color: 'var(--text-dim)' }}
-          />
-        </Tooltip>
+
 
         {/* Backend status */}
         <Tooltip title={backendOk == null ? 'Checking backend…' : backendOk ? 'Backend connected' : 'Backend offline — running in static mode'}>
@@ -393,6 +414,8 @@ export default function App() {
           )}
           <UmapCanvas
             points={points}
+            xDim={xDim}
+            yDim={yDim}
             selectedId={selected?.id ?? selected?.tcr_id}
             filters={filters}
             onSelect={handleSelect}
@@ -477,17 +500,52 @@ export default function App() {
             )}
           </div>
 
-          {/* Click-to-select hint */}
-          {!loading && !selected && !panelOpen && points.length > 0 && (
+          {/* Floating Edit Bar */}
+          {!loading && points.length > 0 && (
             <div style={{
-              position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)',
-              background: 'rgba(13,15,23,0.85)', backdropFilter: 'blur(8px)',
+              position: 'absolute', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+              background: 'rgba(13,15,23,0.85)', backdropFilter: 'blur(12px)',
               border: '1px solid rgba(255,255,255,0.1)',
-              borderRadius: 20, padding: '6px 16px',
-              fontSize: 12, color: 'rgba(255,255,255,0.45)',
-              pointerEvents: 'none',
+              borderRadius: 100, padding: '8px 24px',
+              display: 'flex', alignItems: 'center', gap: 20,
+              boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+              zIndex: 10,
             }}>
-              Click any point to select a TCR · Scroll to zoom · Drag to pan
+              <Tooltip title="Lasso Selection">
+                <Button
+                  shape="circle"
+                  type={lassoMode ? 'primary' : 'text'}
+                  icon={<DragOutlined />}
+                  onClick={() => {
+                    setLassoMode(!lassoMode)
+                    if (lassoMode) setLassoSelected([])
+                  }}
+                  style={lassoMode ? { background: 'var(--color-primary)', border: 'none' } : { color: 'var(--text-dim)', border: 'none' }}
+                />
+              </Tooltip>
+
+              <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.1)' }} />
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Dims</span>
+                <Slider
+                  min={1}
+                  max={4}
+                  value={xDim}
+                  onChange={v => { setXDim(v); setYDim(v + 1); }}
+                  tooltip={{ formatter: v => `Dims ${v}-${v + 1}` }}
+                  style={{ width: 100, margin: 0 }}
+                />
+              </div>
+
+              {!panelOpen && (
+                <>
+                  <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.1)' }} />
+                  <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', pointerEvents: 'none', whiteSpace: 'nowrap' }}>
+                    {lassoMode ? 'Draw to select' : 'Click to select · Scroll to zoom'}
+                  </div>
+                </>
+              )}
             </div>
           )}
         </Content>
