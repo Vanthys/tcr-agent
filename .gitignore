@@ -6,3 +6,4 @@ data/predictions_mock
 data/processed
 data.zip
 handover
+.DS_Store

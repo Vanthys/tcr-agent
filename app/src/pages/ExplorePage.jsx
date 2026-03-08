@@ -12,7 +12,7 @@
  *   │         │      CanvasFloatingBar (overlay, bottom)         │
  *   └─────────┴──────────────────────────────────────────────────┘
  */
-import { useState, useEffect, useContext } from 'react'
+import { useState, useEffect, useContext, useMemo, useCallback } from 'react'
 import { Layout, Spin } from 'antd'
 import { ThemeContext } from '../main'
 import { useExploreData } from '../hooks/useExploreData.jsx'
@@ -39,12 +39,46 @@ export default function ExplorePage() {
   const [panelOpen, setPanelOpen] = useState(false)
   const [displayPoint, setDisplayPoint] = useState(null)
   const [filters, setFilters] = useState({ source: '', category: '' })
+  const [hiddenCategories, setHiddenCategories] = useState(new Set())
   const [provider, setProvider] = useState('claude')
   const [lassoMode, setLassoMode] = useState(false)
   const [lassoSelected, setLassoSelected] = useState([])
   const [xDim, setXDim] = useState(1)
   const [yDim, setYDim] = useState(2)
   const [sliderVal, setSliderVal] = useState(1)
+
+  // Compute per-category counts from loaded points
+  const categoryCounts = useMemo(() => {
+    const counts = {}
+    if (!points) return counts
+    for (const p of points) {
+      const cat = p.a ?? p.antigen_category ?? 'unknown'
+      counts[cat] = (counts[cat] || 0) + 1
+    }
+    return counts
+  }, [points])
+
+  const handleToggleCategory = useCallback((key, solo) => {
+    setHiddenCategories(prev => {
+      const ALL_CATS = ['viral', 'melanocyte', 'cancer_associated', 'autoimmune', 'bacterial', 'neurodegeneration', 'reactive_unclassified', 'other', 'unknown']
+      const next = new Set(prev)
+      if (solo) {
+        // Solo mode: show only this category (hide all others)
+        const allHiddenExceptThis = ALL_CATS.filter(c => c !== key)
+        // If already in solo mode for this key, reset to show all
+        if (prev.size === allHiddenExceptThis.length && allHiddenExceptThis.every(c => prev.has(c))) {
+          return new Set()
+        }
+        return new Set(allHiddenExceptThis)
+      }
+      // Toggle mode
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+    // Clear any single-category dropdown filter since legend now controls it
+    setFilters(f => ({ ...f, category: '' }))
+  }, [])
 
   // Open/close detail panel when selection changes
   useEffect(() => {
@@ -89,7 +123,15 @@ export default function ExplorePage() {
       />
 
       <Layout style={{ flex: 1, overflow: 'hidden' }}>
-        <AppSidebar stats={stats} provider={provider} onProviderChange={setProvider} />
+        <AppSidebar
+          stats={stats}
+          provider={provider}
+          onProviderChange={setProvider}
+          categoryCounts={categoryCounts}
+          hiddenCategories={hiddenCategories}
+          onToggleCategory={handleToggleCategory}
+          onResetCategories={() => setHiddenCategories(new Set())}
+        />
 
         <Content style={{ position: 'relative', overflow: 'hidden', flex: 1 }}>
           {/* Loading overlay */}
@@ -113,6 +155,7 @@ export default function ExplorePage() {
             yDim={yDim}
             selectedId={selected?.id ?? selected?.tcr_id}
             filters={filters}
+            hiddenCategories={hiddenCategories}
             onSelect={setSelected}
             isDark={isDark}
             lassoMode={lassoMode}

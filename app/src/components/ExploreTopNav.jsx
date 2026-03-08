@@ -27,14 +27,7 @@ const SOURCE_OPTIONS = [
     { value: 'McPAS', label: 'McPAS' },
 ]
 
-const CAT_OPTIONS = [
-    { value: '', label: 'All categories' },
-    { value: 'viral', label: 'Viral' },
-    { value: 'melanocyte', label: 'Melanocyte' },
-    { value: 'cancer_associated', label: 'Cancer' },
-    { value: 'autoimmune', label: 'Autoimmune' },
-    { value: 'unknown', label: 'Dark matter only' },
-]
+// Category filter removed — now handled by interactive sidebar legend
 
 export default function ExploreTopNav({
     loading,
@@ -150,15 +143,7 @@ export default function ExploreTopNav({
                 variant="filled"
                 popupMatchSelectWidth={false}
             />
-            <Select
-                value={filters.category}
-                onChange={v => onFiltersChange(f => ({ ...f, category: v }))}
-                options={CAT_OPTIONS}
-                size="small"
-                style={{ width: 160 }}
-                variant="filled"
-                popupMatchSelectWidth={false}
-            />
+            {/* Category filter now in sidebar legend */}
 
             {/* Theme toggle */}
             <Button

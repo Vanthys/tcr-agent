@@ -8,7 +8,7 @@ import SidebarPanels from './SidebarPanels'
 
 const { Sider } = Layout
 
-export default function AppSidebar({ stats, provider, onProviderChange }) {
+export default function AppSidebar({ stats, provider, onProviderChange, categoryCounts, hiddenCategories, onToggleCategory, onResetCategories }) {
     return (
         <Sider
             width={220}
@@ -24,7 +24,13 @@ export default function AppSidebar({ stats, provider, onProviderChange }) {
             collapsedWidth={0}
         >
             <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
-                <SidebarPanels stats={stats} />
+                <SidebarPanels
+                    stats={stats}
+                    categoryCounts={categoryCounts}
+                    hiddenCategories={hiddenCategories}
+                    onToggleCategory={onToggleCategory}
+                    onResetCategories={onResetCategories}
+                />
             </div>
 
             {/* AI Provider selector */}
