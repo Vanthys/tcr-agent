@@ -39,14 +39,30 @@ Write a concise, punchy final report for the user. Do not use filler. Use markdo
 </report>
 
 <suggestions>
-[Optional] Only if you need more data (e.g. `search_neighbors(k=100)`, `get_mutagenesis()`).
-List 1-2 concrete tool calls or experimental next steps. Frame them as bullet points.
+If you recommend further investigation, output a JSON array. Each suggestion MUST follow this exact schema:
+[
+  {
+    "type": "expand_neighbors",
+    "label": "Expand neighbor search (k=100)",
+    "reason": "The current 25-neighbor window may miss rare disease-specific TCRs. Widening to 100 would improve cluster confidence.",
+    "params": {"k": 100}
+  },
+  {
+    "type": "compute_mutagenesis",
+    "label": "Compute CDR3 mutation landscape for FLRGRAYGL",
+    "reason": "This epitope has the highest predicted binding score. Mutagenesis would reveal which CDR3 positions are critical for specificity.",
+    "params": {"epitope": "FLRGRAYGL"}
+  }
+]
+Supported types: expand_neighbors, compute_mutagenesis.
+If no further investigation is needed, output an empty array: []
 </suggestions>
 
 Critical rules:
 - NEVER use XML tags inside the report.
 - The <report> should be punchy and professional.
 - Always include all three XML blocks.
+- The <suggestions> block MUST contain ONLY valid JSON — no markdown, no extra text.
 """
 
 
@@ -92,3 +108,31 @@ async def stream_annotation(
     except Exception as exc:
         logger.error("Claude stream error: %s", exc)
         yield {"data": f"\n[error] Claude API error: {exc}"}
+
+async def analyze_tool_result_stream(prompt: str):
+    """
+    Stream a brief conversational analysis of a tool result.
+    Does not use the heavy system prompt or XML structure.
+    """
+    from core.config import settings
+    from anthropic import AsyncAnthropic
+    import httpx
+    # Use standard httpx client config to match main annotate
+    client = AsyncAnthropic(
+        api_key=settings.anthropic_api_key,
+        http_client=httpx.AsyncClient(timeout=60.0, limits=httpx.Limits(max_keepalive_connections=50))
+    )
+    
+    messages = [{"role": "user", "content": prompt}]
+    
+    try:
+        async with client.messages.stream(
+            model=settings.claude_model,
+            max_tokens=600,
+            messages=messages,
+        ) as stream:
+            async for text in stream.text_stream:
+                yield text
+    except Exception as exc:
+        logger.error("Claude tools analysis error: %s", exc)
+        yield f"\n\n*Error analyzing results: {str(exc)}*"

@@ -15,6 +15,7 @@ import {
 } from '@ant-design/icons'
 import { streamAnnotate, api } from '../api'
 import ReactMarkdown from 'react-markdown'
+import { PlayCircleOutlined, LoadingOutlined, WarningOutlined } from '@ant-design/icons'
 
 const STEP_META = {
     neighbors: { icon: <SearchOutlined />, label: 'Neighbor Search', color: '#4ecdc4' },
@@ -61,7 +62,10 @@ export default function AgentLog({ tcrId, provider, onClose }) {
     const [isExpanded, setIsExpanded] = useState(false)
     const [cachedAt, setCachedAt] = useState(null)
     const [isClearing, setIsClearing] = useState(false)
-    const [refreshKey, setRefreshKey] = useState(0)   // increment to force re-stream
+    const [refreshKey, setRefreshKey] = useState(0)
+    // activeJobs: [{id, label, state:'running'|'done'|'error', result, error}]
+    const [activeJobs, setActiveJobs] = useState([])
+    const [followups, setFollowups] = useState([])
     const abortRef = useRef(null)
     const logBodyRef = useRef(null)
     const modalBodyRef = useRef(null)
@@ -81,6 +85,7 @@ export default function AgentLog({ tcrId, provider, onClose }) {
         setDone(false)
         setStreaming(true)
         setCachedAt(null)
+        setFollowups([])
         seenStepsRef.current = new Set()
 
         if (abortRef.current) abortRef.current.abort()
@@ -147,6 +152,12 @@ export default function AgentLog({ tcrId, provider, onClose }) {
 
             } else if (type === 'cached') {
                 setCachedAt(data?.cached_at ?? 'unknown')
+
+            } else if (type === 'followup') {
+                try {
+                    const parsed = JSON.parse(data)
+                    setFollowups(prev => [...prev, parsed])
+                } catch { }
 
             } else if (type === 'done') {
                 setStreaming(false)
@@ -296,28 +307,31 @@ export default function AgentLog({ tcrId, provider, onClose }) {
                         )}
 
                         {suggestionsText && (
-                            <div style={{
-                                marginTop: 8,
-                                padding: '10px 14px',
-                                background: 'rgba(78, 205, 196, 0.05)',
-                                border: '1px solid rgba(78, 205, 196, 0.2)',
-                                borderRadius: 8,
-                            }}>
-                                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--color-primary)', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 4 }}>
-                                    Suggested Action Items {streaming ? <Spin size="small" style={{ marginLeft: 8 }} /> : ''}
-                                </div>
-                                <div style={{
-                                    color: 'var(--text-main)',
-                                    lineHeight: 1.6,
-                                    fontFamily: "'Inter', sans-serif",
-                                    fontSize: 12,
-                                }}>
-                                    <ReactMarkdown components={MARKDOWN_COMPONENTS}>
-                                        {suggestionsText + (streaming ? ' ▍' : '')}
-                                    </ReactMarkdown>
-                                </div>
-                            </div>
+                            <SuggestionButtons
+                                suggestionsText={suggestionsText}
+                                streaming={streaming}
+                                tcrId={tcrId}
+                                provider={provider}
+                                onJobStart={(label) => setActiveJobs(js => [...js, { id: Date.now(), label, state: 'running' }])}
+                                onJobDone={(label, result) => setActiveJobs(js => js.map(j => j.label === label ? { ...j, state: 'done', result } : j))}
+                                onJobError={(label, err) => setActiveJobs(js => js.map(j => j.label === label ? { ...j, state: 'error', error: err } : j))}
+                            />
                         )}
+
+                        {/* Historical followups */}
+                        {followups.map((f, i) => (
+                            <JobCard key={`fu-${i}`} job={{
+                                id: `fu-${i}`,
+                                label: f.suggestion?.label || 'Job run',
+                                state: 'done',
+                                result: f.analysis
+                            }} compact />
+                        ))}
+
+                        {/* Inline active job result cards */}
+                        {activeJobs.map((job) => (
+                            <JobCard key={job.id} job={job} compact />
+                        ))}
                     </div>
                 )}
             </div>
@@ -389,28 +403,31 @@ export default function AgentLog({ tcrId, provider, onClose }) {
                             )}
 
                             {suggestionsText && (
-                                <div style={{
-                                    marginTop: 12,
-                                    padding: '14px 18px',
-                                    background: 'rgba(78, 205, 196, 0.05)',
-                                    border: '1px solid rgba(78, 205, 196, 0.2)',
-                                    borderRadius: 10,
-                                }}>
-                                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-primary)', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 8 }}>
-                                        Suggested Action Items {streaming ? <Spin size="small" style={{ marginLeft: 8 }} /> : ''}
-                                    </div>
-                                    <div style={{
-                                        color: 'var(--text-main)',
-                                        lineHeight: 1.6,
-                                        fontFamily: "'Inter', sans-serif",
-                                        fontSize: 14,
-                                    }}>
-                                        <ReactMarkdown components={MODAL_MARKDOWN_COMPONENTS}>
-                                            {suggestionsText + (streaming ? ' ▍' : '')}
-                                        </ReactMarkdown>
-                                    </div>
-                                </div>
+                                <SuggestionButtons
+                                    suggestionsText={suggestionsText}
+                                    streaming={streaming}
+                                    tcrId={tcrId}
+                                    provider={provider}
+                                    onJobStart={(label) => setActiveJobs(js => [...js, { id: Date.now(), label, state: 'running' }])}
+                                    onJobDone={(label, result) => setActiveJobs(js => js.map(j => j.label === label && j.state === 'running' ? { ...j, state: 'done', result } : j))}
+                                    onJobError={(label, err) => setActiveJobs(js => js.map(j => j.label === label && j.state === 'running' ? { ...j, state: 'error', error: err } : j))}
+                                />
                             )}
+
+                            {/* Historical followups */}
+                            {followups.map((f, i) => (
+                                <JobCard key={`fu-modal-${i}`} job={{
+                                    id: `fu-modal-${i}`,
+                                    label: f.suggestion?.label || 'Job run',
+                                    state: 'done',
+                                    result: f.analysis
+                                }} />
+                            ))}
+
+                            {/* Inline active job result cards */}
+                            {activeJobs.map((job) => (
+                                <JobCard key={job.id} job={job} />
+                            ))}
                         </div>
                     )}
                 </div>
@@ -472,3 +489,201 @@ function LogLine({ line }) {
 
     return null
 }
+
+const SUGGESTION_COLORS = {
+    expand_neighbors: { bg: 'rgba(78,205,196,0.08)', border: 'rgba(78,205,196,0.3)', accent: '#4ecdc4' },
+    compute_mutagenesis: { bg: 'rgba(196,69,105,0.08)', border: 'rgba(196,69,105,0.3)', accent: '#c44569' },
+}
+
+function SuggestionButtons({ suggestionsText, streaming, tcrId, provider, onJobStart, onJobDone, onJobError, onJobFullComplete }) {
+    const [jobStates, setJobStates] = useState({}) // { idx: 'idle'|'running'|'done'|'error' }
+    const pollerRefs = useRef({})
+
+    // Try to parse as JSON; fall back to plain text
+    let suggestions = null
+    try {
+        const trimmed = suggestionsText.trim()
+        const parsed = JSON.parse(trimmed)
+        if (Array.isArray(parsed) && parsed.length > 0) suggestions = parsed
+    } catch { /* fall through */ }
+
+    // Fallback: still-streaming (show placeholder) or truly unstructured markdown
+    if (!suggestions) {
+        return (
+            <div style={{
+                marginTop: 8, padding: '10px 14px',
+                background: 'rgba(78,205,196,0.05)',
+                border: '1px solid rgba(78,205,196,0.2)', borderRadius: 8,
+                display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+                {streaming
+                    ? <><Spin size="small" /><span style={{ fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic' }}>Drafting suggested next steps…</span></>
+                    : <div style={{ color: 'var(--text-dim)', fontSize: 12, whiteSpace: 'pre-wrap', fontFamily: "'Inter', sans-serif" }}>{suggestionsText}</div>
+                }
+            </div>
+        )
+    }
+
+    const startJob = async (suggestion, idx) => {
+        setJobStates(s => ({ ...s, [idx]: 'running' }))
+        onJobStart?.(suggestion.label)
+
+        let resultText = ''
+
+        try {
+            api.dispatchSuggestion(tcrId, provider, suggestion, {
+                onMessage: (event, data) => {
+                    // Update job label if it's a step
+                    if (event === 'step') {
+                        try {
+                            const parsed = JSON.parse(data)
+                            // We don't overwrite the main row label, but we could
+                        } catch { }
+                    } else if (event === 'raw_result') {
+                        // We could show the raw result, but we'll wait for the LLM analysis
+                    } else if (event === 'text') {
+                        try {
+                            const chunk = JSON.parse(data)
+                            resultText += chunk
+                            // We are actively receiving result, switch to 'done' state to show the text container
+                            setJobStates(s => ({ ...s, [idx]: 'done' }))
+                            onJobDone?.(suggestion.label, resultText)
+                        } catch { }
+                    }
+                },
+                onError: (err) => {
+                    setJobStates(s => ({ ...s, [idx]: 'error' }))
+                    onJobError?.(suggestion.label, err.message || String(err))
+                },
+                onClose: () => {
+                    setJobStates(s => ({ ...s, [idx]: 'done' }))
+                    onJobDone?.(suggestion.label, resultText)
+                    onJobFullComplete?.()
+                }
+            })
+        } catch (e) {
+            setJobStates(s => ({ ...s, [idx]: 'error' }))
+            onJobError?.(suggestion.label, String(e))
+        }
+    }
+
+    return (
+        <div style={{
+            marginTop: 8, padding: '10px 14px',
+            background: 'rgba(78,205,196,0.04)',
+            border: '1px solid rgba(78,205,196,0.15)', borderRadius: 8,
+        }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--color-primary)', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 8 }}>
+                Suggested Next Steps
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {suggestions.map((s, idx) => {
+                    const state = jobStates[idx] ?? 'idle'
+                    const colors = SUGGESTION_COLORS[s.type] ?? SUGGESTION_COLORS.expand_neighbors
+                    return (
+                        <div key={idx} style={{
+                            display: 'flex', alignItems: 'flex-start', gap: 10,
+                            padding: '8px 10px',
+                            background: colors.bg,
+                            border: `1px solid ${colors.border}`,
+                            borderRadius: 6,
+                        }}>
+                            <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-main)', marginBottom: 2 }}>
+                                    {s.label}
+                                </div>
+                                {s.reason && (
+                                    <div style={{ fontSize: 10, color: 'var(--text-dim)', lineHeight: 1.5, fontFamily: "'Inter', sans-serif" }}>
+                                        {s.reason}
+                                    </div>
+                                )}
+                            </div>
+                            <Tooltip title={
+                                state === 'done' ? 'Done — result added below' :
+                                    state === 'error' ? 'Job failed' :
+                                        state === 'running' ? 'Running…' : 'Run this analysis'
+                            }>
+                                <Button
+                                    type="text" size="small"
+                                    icon={
+                                        state === 'running' ? <LoadingOutlined style={{ color: colors.accent }} /> :
+                                            state === 'done' ? <CheckCircleOutlined style={{ color: '#2ecc71' }} /> :
+                                                state === 'error' ? <WarningOutlined style={{ color: '#ff6b6b' }} /> :
+                                                    <PlayCircleOutlined style={{ color: colors.accent }} />
+                                    }
+                                    disabled={state !== 'idle'}
+                                    onClick={() => startJob(s, idx)}
+                                    style={{ flexShrink: 0 }}
+                                />
+                            </Tooltip>
+                        </div>
+                    )
+                })}
+            </div>
+        </div>
+    )
+}
+
+function JobCard({ job, compact }) {
+    const isRunning = job.state === 'running'
+    const isError = job.state === 'error'
+
+    return (
+        <div style={{
+            marginTop: 8,
+            padding: compact ? '8px 10px' : '12px 16px',
+            background: isError ? 'rgba(255,107,107,0.06)' : isRunning ? 'rgba(162,155,254,0.06)' : 'rgba(46,204,113,0.06)',
+            border: `1px solid ${isError ? 'rgba(255,107,107,0.25)' : isRunning ? 'rgba(162,155,254,0.25)' : 'rgba(46,204,113,0.25)'}`,
+            borderRadius: 8,
+        }}>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: (isRunning || isError) ? 0 : 8 }}>
+                {isRunning && <LoadingOutlined style={{ color: '#a29bfe', fontSize: 12 }} />}
+                {!isRunning && !isError && <CheckCircleOutlined style={{ color: '#2ecc71', fontSize: 12 }} />}
+                {isError && <WarningOutlined style={{ color: '#ff6b6b', fontSize: 12 }} />}
+                <span style={{
+                    fontSize: 10, fontWeight: 700, letterSpacing: '0.04em',
+                    textTransform: 'uppercase',
+                    color: isError ? '#ff6b6b' : isRunning ? '#a29bfe' : '#2ecc71',
+                }}>
+                    {isRunning ? `Running: ${job.label}` : isError ? `Failed: ${job.label}` : job.label}
+                </span>
+            </div>
+
+            {/* Animated progress bar while running */}
+            {isRunning && (
+                <div style={{ marginTop: 6, height: 2, background: 'rgba(162,155,254,0.15)', borderRadius: 2, overflow: 'hidden' }}>
+                    <div style={{
+                        height: '100%', width: '40%',
+                        background: 'linear-gradient(90deg, transparent, #a29bfe, transparent)',
+                        animation: 'slide-bar 1.5s ease-in-out infinite',
+                    }} />
+                </div>
+            )}
+
+            {/* Result text — markdown */}
+            {job.state === 'done' && job.result && (
+                <div style={{
+                    marginTop: 8,
+                    color: 'var(--text-main)',
+                    fontFamily: "'Inter', sans-serif",
+                    fontSize: compact ? 13 : 15,
+                    lineHeight: 1.7,
+                }}>
+                    <ReactMarkdown components={compact ? MARKDOWN_COMPONENTS : MODAL_MARKDOWN_COMPONENTS}>
+                        {job.result}
+                    </ReactMarkdown>
+                </div>
+            )}
+
+            {/* Error message */}
+            {isError && job.error && (
+                <div style={{ marginTop: 6, fontSize: 10, color: '#ff6b6b', fontFamily: "'Inter', sans-serif" }}>
+                    {job.error}
+                </div>
+            )}
+        </div>
+    )
+}
+
+

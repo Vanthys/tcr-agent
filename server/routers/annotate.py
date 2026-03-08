@@ -27,7 +27,8 @@ from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from core.config import settings
-from data.db import save_chat, load_chat, clear_chat, list_all_chats
+from core.worker import start_suggestion_job
+from data.db import save_chat, load_chat, clear_chat, list_all_chats, append_followup
 from data.store import DataStore, get_store
 from services import claude, gemini, tools
 
@@ -40,6 +41,12 @@ class AnnotateRequest(BaseModel):
     question: Optional[str] = None
     provider: str = "claude"
     force_refresh: bool = False  # if True, skip cache
+
+
+class SuggestionRequest(BaseModel):
+    tcr_id: str
+    provider: str = "claude"
+    suggestion: dict  # {type, label, reason, params}
 
 
 @router.post("/annotate")
@@ -81,6 +88,11 @@ async def annotate(
                 text = payload.get("text", "")
                 if text:
                     yield {"event": "text", "data": json.dumps(text)}
+                    
+                # Replay any followups
+                for f in payload.get("followups", []):
+                    yield {"event": "followup", "data": json.dumps(f)}
+                    
                 yield {"event": "cached", "data": json.dumps({"cached_at": cached["cached_at"]})}
                 yield {"event": "done", "data": "{}"}
             return EventSourceResponse(_cached_event_generator())
@@ -137,6 +149,14 @@ async def annotate(
 
         full_context = "\n\n".join(context_parts)
 
+        # 3b. Append any extra_context from previous suggestion jobs
+        cached_for_extra = load_chat(request.tcr_id, request.provider)
+        extra = []
+        if cached_for_extra:
+            extra = cached_for_extra["payload"].get("extra_context", [])
+            if extra:
+                full_context += "\n\n## Additional Context from Suggestion Jobs\n" + "\n\n".join(extra)
+
         # 4. Synthesize (LLM generation) — accumulate text for caching
         if request.provider == "gemini":
             provider_stream = gemini.stream_annotation(full_context=full_context, question=request.question)
@@ -157,11 +177,70 @@ async def annotate(
             save_chat(request.tcr_id, request.provider, {
                 "steps": accumulated_steps,
                 "text": "".join(accumulated_text),
+                "extra_context": extra
             })
         except Exception as e:
             logger.error("Failed to save chat cache: %s", e)
 
         # Signal stream end
+        yield {"event": "done", "data": "{}"}
+
+    return EventSourceResponse(event_generator())
+
+
+@router.post("/annotate/suggestion")
+async def dispatch_suggestion(
+    request: SuggestionRequest,
+    store: DataStore = Depends(get_store),
+):
+    """
+    Executes a structured suggestion inline, then streams a brief LLM analysis of the result.
+    Returns an SSE stream so the frontend JobCard can show the live text.
+    """
+    from core.worker import execute_suggestion_inline
+
+    async def event_generator():
+        try:
+            sug_type = request.suggestion.get("type", "unknown")
+            # 1. Execute the tool directly and get the raw string result
+            yield _step_event("running", {"label": f"Running {sug_type}..."})
+            result_snippet = await execute_suggestion_inline(request.tcr_id, request.provider, request.suggestion)
+            
+            # 2. Yield the raw result so the UI can display it immediately if needed
+            yield _step_event("raw_result", {"snippet": result_snippet})
+            
+            # 3. Call the LLM to analyze this specific result inline
+            yield _step_event("analyzing", {"label": "Analyzing findings..."})
+            
+            prompt = (
+                f"You are a TCR analysis assistant. You just suggested the user run the tool `{sug_type}`.\n"
+                f"The tool has finished running for TCR {request.tcr_id}.\n\n"
+                f"Here are the raw results:\n```\n{result_snippet}\n```\n\n"
+                "Please provide a very brief (2-3 sentences max) analysis of what these results mean "
+                "in the context of this TCR. Be direct, do not use XML tags, just conversational markdown text."
+            )
+            
+            if request.provider == "gemini":
+                from services.gemini import analyze_tool_result_stream
+            else:
+                from services.claude import analyze_tool_result_stream
+                
+            accumulated_text = []
+            async for chunk in analyze_tool_result_stream(prompt):
+                 accumulated_text.append(chunk)
+                 yield {"event": "text", "data": json.dumps(chunk)}
+                 
+            # Save this followup interaction to the cache!
+            append_followup(request.tcr_id, request.provider, {
+                "suggestion": request.suggestion,
+                "result_snippet": result_snippet,
+                "analysis": "".join(accumulated_text)
+            })
+                 
+        except Exception as e:
+            logger.error("Suggestion error: %s", e)
+            yield {"event": "error", "data": json.dumps(f"Job failed: {str(e)}")}
+            
         yield {"event": "done", "data": "{}"}
 
     return EventSourceResponse(event_generator())

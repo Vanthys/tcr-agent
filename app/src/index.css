@@ -186,6 +186,16 @@ body,
   animation: glowPulse 2s ease infinite;
 }
 
+@keyframes slide-bar {
+  0% {
+    transform: translateX(-100%);
+  }
+
+  100% {
+    transform: translateX(250%);
+  }
+}
+
 /* ── Panel transitions ───────────────────────────────────────────────────── */
 .detail-panel-overlay {
   transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);

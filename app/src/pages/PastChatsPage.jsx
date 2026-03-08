@@ -4,7 +4,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Layout, Button, Popconfirm, Spin, Empty, Tag, Tooltip, Modal, Input } from 'antd'
 import {
-    RobotOutlined, DeleteOutlined, SearchOutlined,
+    RobotOutlined, DeleteOutlined, SearchOutlined, ArrowLeftOutlined,
     ClockCircleOutlined, HistoryOutlined, ReloadOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
@@ -70,39 +70,21 @@ export default function PastChatsPage() {
                 background: 'var(--bg-surface)',
                 borderBottom: '1px solid var(--border)',
                 padding: '0 20px',
-                height: 52,
-                display: 'flex', alignItems: 'center', gap: 16,
-                flexShrink: 0,
+                display: 'flex', alignItems: 'center', gap: 20
             }}>
-                {/* Logo */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div style={{
-                        width: 28, height: 28, borderRadius: 8,
-                        background: 'linear-gradient(135deg, #4ecdc4, #a29bfe)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 11, fontWeight: 800, color: '#0d0f17',
-                    }}>TCR</div>
-                    <div>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-main)', lineHeight: 1.2 }}>
-                            TCR Agent
-                        </div>
-                        <div style={{ fontSize: 10, color: 'var(--text-dim)', lineHeight: 1.2 }}>
-                            Past Agent Analyses
-                        </div>
-                    </div>
-                </div>
+                <Button
+                    icon={<ArrowLeftOutlined />}
+                    type="text"
+                    onClick={() => navigate('/')}
+                    style={{ color: 'var(--text-main)' }}
+                >
+                    Back to Explorer
+                </Button>
 
-                {/* Page title */}
-                <div style={{
-                    display: 'flex', alignItems: 'center', gap: 8,
-                    padding: '4px 10px',
-                    background: 'rgba(162, 155, 254, 0.1)',
-                    border: '1px solid rgba(162, 155, 254, 0.2)',
-                    borderRadius: 20,
-                    fontSize: 11, fontWeight: 600, color: '#a29bfe',
-                    letterSpacing: '0.04em',
-                }}>
-                    <HistoryOutlined /> Past Chats
+
+
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-main)' }}>
+                    View Past Chats
                 </div>
 
                 <div style={{ flex: 1 }} />
@@ -123,14 +105,6 @@ export default function PastChatsPage() {
                     onClick={loadChats} loading={loading}
                     style={{ color: 'var(--text-dim)' }}
                 />
-
-                <Button
-                    size="small"
-                    onClick={() => navigate('/')}
-                    style={{ color: 'var(--text-dim)', borderColor: 'var(--border)' }}
-                >
-                    ← Back to Explorer
-                </Button>
             </Header>
 
             {/* Body */}

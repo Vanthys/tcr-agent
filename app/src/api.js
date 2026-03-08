@@ -7,6 +7,7 @@
 
 const BASE = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:3001'
 
+import { fetchEventSource } from '@microsoft/fetch-event-source'
 import { parse } from '@loaders.gl/core'
 import { ArrowLoader } from '@loaders.gl/arrow'
 
@@ -77,6 +78,40 @@ export const api = {
     listAllChats: () => get('/api/annotate/caches'),
     clearChatCache: (tcrId, provider = 'claude') =>
         fetch(`${BASE}/api/annotate/cache/${encodeURIComponent(tcrId)}?provider=${encodeURIComponent(provider)}`, { method: 'DELETE' }).then(r => r.json()),
+
+    dispatchSuggestion: (tcrId, provider, suggestion, callbacks) => {
+        const { onMessage, onError, onClose } = callbacks
+        const controller = new AbortController()
+
+        fetchEventSource(`${BASE}/api/annotate/suggestion`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tcr_id: tcrId, provider, suggestion }),
+            signal: controller.signal,
+            onmessage(msg) {
+                if (msg.event === 'done') {
+                    onClose?.()
+                    return
+                }
+                if (msg.event === 'error') {
+                    onError?.(new Error(msg.data))
+                    return
+                }
+                if (msg.event === 'step' || msg.event === 'text' || msg.event === 'raw_result' || msg.event === 'analyzing') {
+                    onMessage?.(msg.event, msg.data)
+                }
+            },
+            onerror(err) {
+                onError?.(err)
+                throw err // prevent retry
+            },
+            onclose() {
+                onClose?.()
+            }
+        })
+        return controller
+    },
+    getWorkerTask: (taskId) => get(`/api/worker/status/${encodeURIComponent(taskId)}`),
 }
 
 // ── SSE annotate stream ───────────────────────────────────────────────────────
