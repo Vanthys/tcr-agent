@@ -30,6 +30,9 @@ class DataStore:
         self.neighbor_cache: dict[str, list[dict]] = {}
         self.mutagenesis_cache: dict[str, dict[str, Any]] = {}
 
+        # Ephemeral ingested points — in-memory only, cleared on restart
+        self.ingested_points: list[dict] = []
+
     # ── Status helpers ────────────────────────────────────────────────────────
 
     @property

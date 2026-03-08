@@ -39,6 +39,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Log ALL unhandled exceptions so we can see what's really failing
+from fastapi import Request
+from fastapi.responses import JSONResponse
+import traceback as _tb
+
+@app.exception_handler(Exception)
+async def _debug_exception_handler(request: Request, exc: Exception):
+    print(f"\n{'='*60}", flush=True)
+    print(f"UNHANDLED EXCEPTION on {request.method} {request.url.path}", flush=True)
+    _tb.print_exc()
+    print(f"{'='*60}\n", flush=True)
+    return JSONResponse(status_code=500, content={"detail": str(exc)})
+
 from fastapi.staticfiles import StaticFiles
 
 app.include_router(health.router)
@@ -53,3 +66,18 @@ app.include_router(synthesis.router)
 app.include_router(null_distribution.router)
 
 app.mount("/data", StaticFiles(directory=settings.project_root / "data"), name="data")
+
+
+# ── Ingested points endpoints (in main.py to avoid reload issues) ────────────
+from data.store import get_store as _get_store
+
+
+@app.get("/api/umap/ingested")
+def get_ingested_points():
+    return getattr(_get_store(), 'ingested_points', [])
+
+
+@app.delete("/api/umap/ingested")
+def clear_ingested_points():
+    _get_store().ingested_points = []
+    return {"cleared": True}

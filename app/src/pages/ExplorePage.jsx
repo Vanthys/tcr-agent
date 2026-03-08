@@ -32,6 +32,7 @@ export default function ExplorePage() {
     points, loading, backendOk, stats,
     searchText, setSearchText, searchOptions,
     triggerUmapRecompute, workerLoading,
+    ingestedPoints, clearIngestedPoints,
   } = useExploreData()
 
   // ── UI state ─────────────────────────────────────────────────────────────
@@ -131,6 +132,8 @@ export default function ExplorePage() {
           hiddenCategories={hiddenCategories}
           onToggleCategory={handleToggleCategory}
           onResetCategories={() => setHiddenCategories(new Set())}
+          ingestedPoints={ingestedPoints}
+          onClearIngested={clearIngestedPoints}
         />
 
         <Content style={{ position: 'relative', overflow: 'hidden', flex: 1 }}>
@@ -151,6 +154,7 @@ export default function ExplorePage() {
 
           <UmapCanvas
             points={points}
+            ingestedPoints={ingestedPoints}
             xDim={xDim}
             yDim={yDim}
             selectedId={selected?.id ?? selected?.tcr_id}

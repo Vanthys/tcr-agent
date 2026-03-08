@@ -14,7 +14,8 @@ def get_esm_model():
     if _model is None:
         import esm
         logger.info("Loading ESM-2 model (esm2_t33_650M_UR50D)...")
-        _model, _alphabet = esm.pretrained.esm2_t33_650M_UR50D()
+        result = esm.pretrained.esm2_t33_650M_UR50D()
+        _model, _alphabet = result[0], result[1]
         _batch_converter = _alphabet.get_batch_converter()
         _model.eval()
         if torch.cuda.is_available():

@@ -70,6 +70,8 @@ export const api = {
             if (buffer.trim()) onChunk([JSON.parse(buffer)])
         })
     },
+    ingestedPoints: () => get('/umap/ingested'),
+    clearIngested: () => fetch(new URL('/umap/ingested'), { method: 'DELETE' }).then(r => r.json()),
     tcr: (id) => get(`/tcr/${encodeURIComponent(id)}`),
     mutagenesis: (id, params = {}) => get(`/mutagenesis/${encodeURIComponent(id)}`, params),
     epitopeDistribution: () => get('/epitope_distribution'),

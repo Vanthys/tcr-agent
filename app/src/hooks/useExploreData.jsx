@@ -15,6 +15,7 @@ export function useExploreData() {
     const [stats, setStats] = useState(null)
     const [searchText, setSearchText] = useState('')
     const [workerLoading, setWorkerLoading] = useState(false)
+    const [ingestedPoints, setIngestedPoints] = useState([])
 
     // ── Health check ────────────────────────────────────────────────────────────
     useEffect(() => {
@@ -54,6 +55,18 @@ export function useExploreData() {
             controller.abort()
         }
     }, [])
+
+    // ── Poll for ephemeral ingested points (pipeline may still be running) ──────
+    useEffect(() => {
+        if (!backendOk) return
+        const fetch = () =>
+            api.ingestedPoints()
+                .then(pts => setIngestedPoints(pts ?? []))
+                .catch(() => {})
+        fetch()
+        const id = setInterval(fetch, 3000)
+        return () => clearInterval(id)
+    }, [backendOk])
 
     // ── Search / autocomplete options ────────────────────────────────────────────
     const searchOptions = useMemo(() => {
@@ -127,6 +140,11 @@ export function useExploreData() {
         }
     }
 
+    const clearIngestedPoints = () => {
+        api.clearIngested().catch(() => {})
+        setIngestedPoints([])
+    }
+
     return {
         points,
         loading,
@@ -137,5 +155,7 @@ export function useExploreData() {
         searchOptions,
         triggerUmapRecompute,
         workerLoading,
+        ingestedPoints,
+        clearIngestedPoints,
     }
 }

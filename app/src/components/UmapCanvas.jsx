@@ -47,7 +47,7 @@ function getColor(p, isDark) {
     return colors[p.a ?? p.antigen_category ?? 'unknown'] ?? colors.unknown
 }
 
-export default function UmapCanvas({ points, selectedId, filters, hiddenCategories, onSelect, isDark = true, isRevealing, onRevealComplete, lassoMode, onLassoSelect, lassoSelected = [], xDim = 1, yDim = 2 }) {
+export default function UmapCanvas({ points, ingestedPoints = [], selectedId, filters, hiddenCategories, onSelect, isDark = true, isRevealing, onRevealComplete, lassoMode, onLassoSelect, lassoSelected = [], xDim = 1, yDim = 2 }) {
     const [viewState, setViewState] = useState({
         target: [0, 0, 0],
         zoom: 4,
@@ -90,6 +90,16 @@ export default function UmapCanvas({ points, selectedId, filters, hiddenCategori
             };
         });
     }, [points, isDark, lassoSet, selectedId, filterSource, filterCat, hiddenCatSet, xDim, yDim]);
+
+    // Ingested points overlay data
+    const ingestedData = useMemo(() => {
+        if (!ingestedPoints?.length) return []
+        return ingestedPoints.map(p => ({
+            ...p,
+            position: [(p[`d${xDim}`] ?? p.x ?? 0), (p[`d${yDim}`] ?? p.y ?? 0)],
+            color: [255, 215, 0], // gold
+        }))
+    }, [ingestedPoints, xDim, yDim])
 
     // Initial ViewState Auto-fit — percentile clipping (p2/p98) to ignore outliers
     React.useEffect(() => {
@@ -224,6 +234,37 @@ export default function UmapCanvas({ points, selectedId, filters, hiddenCategori
                     onSelect(info.object);
                 }
             }
+        }),
+        // Dark halo behind ingested points for visibility
+        ingestedData.length > 0 && new ScatterplotLayer({
+            id: 'ingested-halo',
+            data: ingestedData,
+            pickable: false,
+            opacity: 0.9,
+            stroked: false,
+            filled: true,
+            radiusUnits: 'pixels',
+            getPosition: d => d.position,
+            getFillColor: [0, 0, 0],
+            getRadius: 14,
+        }),
+        // Gold ingested points — large and prominent
+        ingestedData.length > 0 && new ScatterplotLayer({
+            id: 'ingested-overlay',
+            data: ingestedData,
+            pickable: true,
+            opacity: 1,
+            stroked: true,
+            filled: true,
+            radiusUnits: 'pixels',
+            lineWidthUnits: 'pixels',
+            getPosition: d => d.position,
+            getFillColor: [255, 185, 0],       // bright gold fill
+            getLineColor: [255, 255, 255],     // white ring
+            getRadius: 10,
+            getLineWidth: 2.5,
+            onHover: info => setHoverInfo(info),
+            onClick: info => { if (info.object && onSelect) onSelect(info.object) },
         }),
         lassoMode && lassoPolygon.length > 0 && new PolygonLayer({
             id: 'lasso-layer',

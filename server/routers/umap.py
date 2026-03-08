@@ -138,7 +138,7 @@ def stream_umap(
             import logging
             logging.getLogger(__name__).error("UMAP stream failed: %s", exc)
 
-            return StreamingResponse(generator(), media_type="application/x-ndjson")
+    return StreamingResponse(generator(), media_type="application/x-ndjson")
 
 @router.get("/umap/arrow")
 def get_umap_arrow(
