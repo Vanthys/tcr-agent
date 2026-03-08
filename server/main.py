@@ -12,7 +12,9 @@ load_dotenv()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
+from core.config import settings
 from core.lifespan import lifespan
 from routers import annotate, health, mutagenesis, stats, tcr, umap, synthesis, null_distribution, worker
 
@@ -37,6 +39,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from fastapi.staticfiles import StaticFiles
+
 app.include_router(health.router)
 app.include_router(umap.router)
 app.include_router(tcr.router)
@@ -47,3 +51,5 @@ app.include_router(stats.router)
 app.include_router(worker.router)
 app.include_router(synthesis.router)
 app.include_router(null_distribution.router)
+
+app.mount("/data", StaticFiles(directory=settings.project_root / "data"), name="data")

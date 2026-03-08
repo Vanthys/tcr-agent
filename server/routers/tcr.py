@@ -43,6 +43,11 @@ def get_tcr_detail(
     # Predictions
     pred_svc = PredictionService(store)
     tcr_dict["predictions"] = pred_svc.get_predictions(tcr_id)
+    
+    # Check for Boltz-2 PDB
+    from core.config import settings
+    boltz2_path = settings.pred_dir / "boltz2" / f"result-{tcr_id}" / "predictions" / "result" / "result_model_0.pdb"
+    tcr_dict["has_boltz2"] = boltz2_path.exists()
 
     return tcr_dict
 

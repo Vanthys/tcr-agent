@@ -5,8 +5,9 @@
  * Blue = score delta < 0
  * White = neutral
  */
-import { useRef, useEffect, useState } from 'react'
+import { useRef, useEffect, useState, useContext } from 'react'
 import { Empty, Spin, Tooltip } from 'antd'
+import { ThemeContext } from '../main.jsx'
 
 const AA_ORDER = [
     'A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L',
@@ -32,6 +33,7 @@ function deltaToColor(delta, maxAbs) {
 export default function MutationHeatmap({ data, loading }) {
     const canvasRef = useRef(null)
     const [hovered, setHovered] = useState(null)
+    const { isDark } = useContext(ThemeContext)
 
     useEffect(() => {
         const canvas = canvasRef.current
@@ -47,7 +49,9 @@ export default function MutationHeatmap({ data, loading }) {
 
         const ctx = canvas.getContext('2d')
         ctx.clearRect(0, 0, W, H)
-        ctx.fillStyle = '#0d0f17'
+
+        const style = getComputedStyle(document.documentElement)
+        ctx.fillStyle = style.getPropertyValue('--bg-base').trim() || (isDark ? '#0a0c12' : '#f0f2f5')
         ctx.fillRect(0, 0, W, H)
 
         // Find max absolute delta for color scale
@@ -69,12 +73,12 @@ export default function MutationHeatmap({ data, loading }) {
 
                 if (aa === wt) {
                     // Wild-type diagonal — show as dark outlined cell
-                    ctx.fillStyle = 'rgba(255,255,255,0.06)'
+                    ctx.fillStyle = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'
                     ctx.fillRect(x, y, CELL.w - 1, CELL.h - 1)
-                    ctx.strokeStyle = 'rgba(255,255,255,0.2)'
+                    ctx.strokeStyle = isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)'
                     ctx.lineWidth = 1
                     ctx.strokeRect(x + 0.5, y + 0.5, CELL.w - 2, CELL.h - 2)
-                    ctx.fillStyle = 'rgba(255,255,255,0.3)'
+                    ctx.fillStyle = isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.4)'
                     ctx.font = '7px Inter'
                     ctx.textAlign = 'center'
                     ctx.fillText('WT', x + CELL.w / 2, y + CELL.h / 2 + 3)
@@ -87,7 +91,7 @@ export default function MutationHeatmap({ data, loading }) {
         }
 
         // Amino acid labels (left axis)
-        ctx.fillStyle = 'rgba(255,255,255,0.45)'
+        ctx.fillStyle = style.getPropertyValue('--text-dim').trim() || (isDark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.45)')
         ctx.font = '9px JetBrains Mono'
         ctx.textAlign = 'right'
         for (let row = 0; row < AA_ORDER.length; row++) {
@@ -101,14 +105,14 @@ export default function MutationHeatmap({ data, loading }) {
         // Position labels (top axis) — show wt amino acid
         ctx.textAlign = 'center'
         for (let col = 0; col < L; col++) {
-            ctx.fillStyle = 'rgba(255,255,255,0.5)'
+            ctx.fillStyle = style.getPropertyValue('--text-main').trim() || (isDark ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.85)')
             ctx.fillText(
                 cdr3[col] ?? col,
                 AXIS_LEFT + col * CELL.w + CELL.w / 2,
                 AXIS_TOP - 6,
             )
         }
-    }, [data])
+    }, [data, isDark])
 
     if (loading) {
         return (
@@ -123,7 +127,7 @@ export default function MutationHeatmap({ data, loading }) {
             <Empty
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
                 description={
-                    <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>
+                    <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>
                         No mutation landscape available<br />for this TCR yet
                     </span>
                 }
@@ -137,7 +141,7 @@ export default function MutationHeatmap({ data, loading }) {
             {/* Epitope label */}
             {data.epitope && (
                 <div style={{
-                    fontSize: 11, color: 'rgba(255,255,255,0.45)',
+                    fontSize: 11, color: 'var(--text-dim)',
                     marginBottom: 8, fontFamily: 'JetBrains Mono, monospace',
                 }}>
                     Target: <span style={{ color: '#fd9644' }}>{data.epitope}</span>
@@ -146,7 +150,7 @@ export default function MutationHeatmap({ data, loading }) {
             )}
 
             {/* Color scale legend */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, fontSize: 10, color: 'var(--text-dim)' }}>
                 <div style={{ width: 60, height: 8, background: 'linear-gradient(to right, #4466ff, white, #ff4444)', borderRadius: 2 }} />
                 <span>↓ binding</span>
                 <span style={{ marginLeft: 'auto' }}>↑ binding</span>
@@ -156,7 +160,7 @@ export default function MutationHeatmap({ data, loading }) {
                 <canvas ref={canvasRef} style={{ display: 'block' }} />
             </div>
 
-            <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.25)', marginTop: 8, fontStyle: 'italic' }}>
+            <p style={{ fontSize: 10, color: 'var(--color-muted)', marginTop: 8, fontStyle: 'italic' }}>
                 Predicted score sensitivity — computational hypotheses, not validated binding measurements.
             </p>
         </div>

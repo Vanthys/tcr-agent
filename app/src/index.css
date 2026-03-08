@@ -201,3 +201,33 @@ body,
 .clause-markdown strong {
   color: #fff;
 }
+
+/* ── PDBe Molstar overrides ──────────────────────────────────────────────── */
+/* The label/URL text */
+.msp-plugin .msp-help-text,
+.msp-plugin .msp-highlight-info {
+  display: none !important;
+}
+
+.msp-plugin .msp-layout-standard {
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.msp-plugin .msp-layout-standard .msp-viewport {
+  border: none !important;
+}
+
+.msp-plugin .msp-plugin-content {
+  background: transparent !important;
+}
+
+/* Hide controls completely */
+.msp-plugin .msp-header,
+.msp-plugin .msp-control-button-wrapper,
+.msp-plugin .msp-btn,
+.msp-plugin .msp-icon,
+.msp-plugin .msp-canvas-controls {
+  display: none !important;
+}

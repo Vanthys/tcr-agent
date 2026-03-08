@@ -12,6 +12,7 @@ import AgentLog from './AgentLog'
 import MutationHeatmap from './MutationHeatmap'
 import SynthesisExport from './SynthesisExport'
 import NullDistribution from './NullDistribution'
+import PdbViewer from './PdbViewer'
 
 const CAT_COLORS = {
     viral: 'var(--cat-viral)',
@@ -202,6 +203,16 @@ export default function TcrDetail({ point, provider, onClose }) {
                 <SectionLabel>Mutation Landscape</SectionLabel>
                 <MutationHeatmap data={mutagenesis} loading={loadingMutagenesis} />
             </div>
+
+            {detail?.has_boltz2 && (
+                <>
+                    <Divider style={{ margin: '4px 0', borderColor: 'var(--border)' }} />
+                    <div>
+                        <SectionLabel>3D Structure (Boltz-2)</SectionLabel>
+                        <PdbViewer tcrId={tcrId} />
+                    </div>
+                </>
+            )}
 
             <Divider style={{ margin: '4px 0', borderColor: 'var(--border)' }} />
 
