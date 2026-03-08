@@ -191,7 +191,15 @@ def load_predictions(path: Path) -> pd.DataFrame:
 # ── Mutagenesis Cache ─────────────────────────────────────────────────────────
 
 def load_mutagenesis_cache(mutagenesis_dir: Path) -> dict[str, dict[str, Any]]:
-    """Scan mutagenesis_dir for pre-computed JSON files → {tcr_id: landscape}."""
+    """
+    Scan mutagenesis_dir for pre-computed JSON files and build a nested lookup
+    of {tcr_id: {epitope: landscape}}.
+
+    The upstream pipeline drops files named `<tcr_id>_<epitope>.json`, so a
+    single TCR can have multiple entries (one per epitope target).  We normalise
+    those into a 2-level dict keyed by the canonical IDs found inside each JSON
+    payload, skipping aggregate helper files like `mutagenesis_summary.json`.
+    """
     cache: dict[str, dict[str, Any]] = {}
     if not mutagenesis_dir.exists():
         logger.info(
@@ -200,13 +208,37 @@ def load_mutagenesis_cache(mutagenesis_dir: Path) -> dict[str, dict[str, Any]]:
         )
         return cache
 
+    skipped = {"mutagenesis_summary.json"}
     for json_file in mutagenesis_dir.glob("*.json"):
-        tcr_id = json_file.stem
+        if json_file.name in skipped:
+            continue
         try:
             with open(json_file) as f:
-                cache[tcr_id] = json.load(f)
+                payload = json.load(f)
         except Exception as exc:
             logger.error("Failed to load mutagenesis file %s: %s", json_file, exc)
+            continue
 
-    logger.info("Mutagenesis cache: %d pre-computed TCRs loaded", len(cache))
+        tcr_id = payload.get("tcr_id") or json_file.stem.split("_")[0]
+        epitope = payload.get("epitope") or "unknown_epitope"
+        if not tcr_id:
+            logger.warning("Skipping mutagenesis file without tcr_id: %s", json_file)
+            continue
+
+        by_epitope = cache.setdefault(tcr_id, {})
+        if epitope in by_epitope:
+            logger.warning(
+                "Duplicate mutagenesis entry for %s/%s detected at %s — overwriting",
+                tcr_id,
+                epitope,
+                json_file,
+            )
+        by_epitope[epitope] = payload
+
+    total_entries = sum(len(epitopes) for epitopes in cache.values())
+    logger.info(
+        "Mutagenesis cache: %d TCRs covering %d epitope landscapes",
+        len(cache),
+        total_entries,
+    )
     return cache

@@ -68,3 +68,28 @@ async def stream_annotation(
     except Exception as exc:
         logger.error("Gemini streaming error: %s", exc)
         yield {"data": f"\n[error] Gemini API error: {exc}"}
+
+async def analyze_tool_result_stream(prompt: str):
+    """
+    Stream a brief conversational analysis of a tool result.
+    Does not use the heavy system prompt or JSON structure.
+    """
+    from core.config import settings
+    # Ensure Gemini is initialized
+    if not os.environ.get("GOOGLE_API_KEY"):
+        genai.configure(api_key=settings.gemini_api_key)
+
+    try:
+        model = genai.GenerativeModel("gemini-1.5-pro")
+        response = await model.generate_content_async(
+            prompt,
+            stream=True
+        )
+
+        async for chunk in response:
+            if chunk.text:
+                yield chunk.text
+
+    except Exception as exc:
+        logger.error("Gemini tools analysis error: %s", exc)
+        yield f"\n\n*Error analyzing results: {str(exc)}*"

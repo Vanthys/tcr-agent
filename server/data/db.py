@@ -119,3 +119,40 @@ def list_all_chats() -> list[dict]:
         {"tcr_id": r[0], "provider": r[1], "cached_at": r[2], "payload_size": r[3]}
         for r in rows
     ]
+
+
+def append_extra_context(tcr_id: str, provider: str, snippet: str) -> None:
+    """Append a context snippet to the cached session so it is included in re-synthesis."""
+    with engine.begin() as conn:
+        row = conn.execute(text("""
+            SELECT payload FROM agent_chats WHERE tcr_id = :tcr_id AND provider = :provider
+        """), {"tcr_id": tcr_id, "provider": provider}).fetchone()
+        if row is None:
+            return  # Nothing to append to
+        payload = json.loads(row[0])
+        extra = payload.get("extra_context", [])
+        extra.append(snippet)
+        payload["extra_context"] = extra
+        conn.execute(text("""
+            UPDATE agent_chats SET payload = :payload WHERE tcr_id = :tcr_id AND provider = :provider
+        """), {"tcr_id": tcr_id, "provider": provider, "payload": json.dumps(payload)})
+    logger.info("Appended extra context for %s (%s)", tcr_id, provider)
+
+
+def append_followup(tcr_id: str, provider: str, followup: dict) -> None:
+    """Append a complete tool analysis interaction to the cached session."""
+    with engine.begin() as conn:
+        row = conn.execute(text("""
+            SELECT payload FROM agent_chats WHERE tcr_id = :tcr_id AND provider = :provider
+        """), {"tcr_id": tcr_id, "provider": provider}).fetchone()
+        if row is None:
+            return  # Nothing to append to
+        payload = json.loads(row[0])
+        followups = payload.get("followups", [])
+        followups.append(followup)
+        payload["followups"] = followups
+        conn.execute(text("""
+            UPDATE agent_chats SET payload = :payload WHERE tcr_id = :tcr_id AND provider = :provider
+        """), {"tcr_id": tcr_id, "provider": provider, "payload": json.dumps(payload)})
+    logger.info("Appended followup message for %s (%s)", tcr_id, provider)
+

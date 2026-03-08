@@ -297,3 +297,157 @@ async def start_ingest_pipeline(file_name: str, file_content: bytes):
     bg.add_done_callback(_background.discard)
     print(f"[INGEST] Background task created: {bg}", flush=True)
     return task
+
+
+# ── Suggestion-triggered jobs ───────────────────────────────────────────────────
+
+async def execute_suggestion_inline(tcr_id: str, provider: str, suggestion: dict) -> str:
+    """Execute a suggestion synchronously (or via threadpool) and return the formatted snippet string."""
+    from data.store import get_store
+    from data.db import append_extra_context
+    from services.tools import ToolExecutor
+    import httpx
+    import asyncio
+
+    store = get_store()
+    executor = ToolExecutor(store)
+
+    suggestion_type = suggestion.get("type", "")
+
+    if suggestion_type == "expand_neighbors":
+        k = suggestion.get("params", {}).get("k", 100)
+        result = executor.execute("search_neighbors", {"tcr_id": tcr_id, "k": k, "limit": k})
+        neighbors = result.get("top_neighbors", [])
+
+        lines = [f"## Expanded Neighbor Search (k={k})"]
+        for n in neighbors:
+            sim = n.get('similarity', 0)
+            ep = n.get('known_epitope') or "Unknown"
+            lines.append(f"- TCR: {n['tcr_id']} | Sim: {sim:.3f} | Epitope: {ep}")
+        snippet = "\n".join(lines)
+        
+        append_extra_context(tcr_id, provider, snippet)
+        return snippet
+
+    elif suggestion_type == "compute_mutagenesis":
+        epitope = suggestion.get("params", {}).get("epitope", "unknown")
+        # Simulate long mutagenesis computation (if missing, it will compute it now)
+        for i in range(1, 10):
+            await asyncio.sleep(0.3)
+            
+        result = executor.execute("get_mutagenesis", {"tcr_id": tcr_id, "limit": 8, "compute_if_missing": True})
+        if not result.get("available"):
+            snippet = f"## Mutagenesis (requested for {epitope})\nNo pre-computed landscape available for this TCR."
+        else:
+            wt = result.get("wild_type_score", "N/A")
+            lines = [
+                f"## In-Silico CDR3 Mutagenesis (target: {epitope})",
+                f"Wild-type score: {wt} | CDR3β: {result.get('cdr3b')}",
+                "Top predicted variants:\",",
+            ]
+            for v in result.get("top_variants", [])[:8]:
+                lines.append(
+                    f"  {v.get('mutations')} → score {v.get('predicted_score', 0):.4f}"
+                    f" (Δ{v.get('delta', 0):+.4f}) — {v.get('note', 'hypothesis')}"
+                )
+            snippet = "\n".join(lines)
+            
+        append_extra_context(tcr_id, provider, snippet)
+        return snippet
+
+    else:
+        raise ValueError(f"Unknown suggestion type: {suggestion_type}")
+
+async def _run_expand_neighbors(task_id: str, tcr_id: str, provider: str, k: int):
+    """Re-run neighbor search with a larger k and append results to the cached context."""
+    from data.store import get_store
+    from data.db import append_extra_context
+    from services.tools import ToolExecutor
+
+    update_task_state(task_id, TaskState.RUNNING, progress=0.1)
+    try:
+        store = get_store()
+        executor = ToolExecutor(store)
+        result = executor.execute("search_neighbors", {"tcr_id": tcr_id, "k": k, "limit": k})
+        neighbors = result.get("top_neighbors", [])
+
+        lines = [f"## Expanded Neighbor Search (k={k})"]
+        for n in neighbors:
+            ep = f" | epitope: {n['known_epitope']}" if n.get("known_epitope") else ""
+            lines.append(
+                f"  {n['tcr_id']} sim={n['similarity']:.3f} src={n.get('source', '?')}{ep}"
+            )
+        snippet = "\n".join(lines)
+
+        append_extra_context(tcr_id, provider, snippet)
+        update_task_state(task_id, TaskState.COMPLETED, progress=1.0, result=snippet)
+    except Exception as exc:
+        logger.error("expand_neighbors job failed: %s", exc)
+        update_task_state(task_id, TaskState.FAILED, error=str(exc))
+
+
+async def _run_compute_mutagenesis(task_id: str, tcr_id: str, provider: str, epitope: str):
+    """Compute in-silico mutagenesis for a given epitope and append results to the context."""
+    from data.store import get_store
+    from data.db import append_extra_context
+    from services.tools import ToolExecutor
+
+    update_task_state(task_id, TaskState.RUNNING, progress=0.1)
+    try:
+        store = get_store()
+        executor = ToolExecutor(store)
+        
+        # Simulate long mutagenesis computation
+        import asyncio
+        for i in range(1, 10):
+            await asyncio.sleep(0.3)
+            update_task_state(task_id, TaskState.RUNNING, progress=0.1 + (i * 0.08))
+            
+        result = executor.execute("get_mutagenesis", {"tcr_id": tcr_id, "limit": 8})
+
+        if not result.get("available"):
+            # Mutagenesis may not be pre-computed; report that clearly
+            snippet = f"## Mutagenesis (requested for {epitope})\nNo pre-computed landscape available for this TCR."
+        else:
+            wt = result.get("wild_type_score", "N/A")
+            lines = [
+                f"## In-Silico CDR3 Mutagenesis (target: {epitope})",
+                f"Wild-type score: {wt} | CDR3β: {result.get('cdr3b')}",
+                "Top predicted variants:",
+            ]
+            for v in result.get("top_variants", [])[:8]:
+                lines.append(
+                    f"  {v.get('mutations')} → score {v.get('predicted_score', 0):.4f}"
+                    f" (Δ{v.get('delta', 0):+.4f}) — {v.get('note', 'hypothesis')}"
+                )
+            snippet = "\n".join(lines)
+
+        append_extra_context(tcr_id, provider, snippet)
+        update_task_state(task_id, TaskState.COMPLETED, progress=1.0, result=snippet)
+    except Exception as exc:
+        logger.error("compute_mutagenesis job failed: %s", exc)
+        update_task_state(task_id, TaskState.FAILED, error=str(exc))
+
+
+def start_suggestion_job(tcr_id: str, provider: str, suggestion: dict):
+    """
+    Dispatch a background job based on a structured suggestion dict.
+    Returns the created AsyncTask.
+    """
+    stype = suggestion.get("type")
+    params = suggestion.get("params", {})
+
+    if stype == "expand_neighbors":
+        k = int(params.get("k", 100))
+        task = create_task(f"Expand Neighbors (k={k}) — {tcr_id}")
+        asyncio.create_task(_run_expand_neighbors(task.task_id, tcr_id, provider, k))
+        return task
+
+    elif stype == "compute_mutagenesis":
+        epitope = params.get("epitope", "unknown")
+        task = create_task(f"Mutagenesis ({epitope}) — {tcr_id}")
+        asyncio.create_task(_run_compute_mutagenesis(task.task_id, tcr_id, provider, epitope))
+        return task
+
+    else:
+        raise ValueError(f"Unknown suggestion type: {stype!r}")
