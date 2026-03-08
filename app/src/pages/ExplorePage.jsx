@@ -82,18 +82,17 @@ export default function ExplorePage() {
   }, [])
 
   // Open/close detail panel when selection changes
+  const lassoCount = lassoSelected.length
+
   useEffect(() => {
     if (selected) {
       setDisplayPoint(selected)
       setPanelOpen(true)
-    } else {
-      setPanelOpen(false)
+      return
     }
-  }, [selected])
-
-  useEffect(() => {
-    if (lassoSelected.length > 0) setPanelOpen(true)
-  }, [lassoSelected])
+    setDisplayPoint(null)
+    setPanelOpen(lassoCount > 0)
+  }, [selected, lassoCount])
 
   const onSearchSelect = (_, option) => {
     setSelected(option.point)
@@ -104,6 +103,24 @@ export default function ExplorePage() {
     setLassoMode(prev => !prev)
     if (lassoMode) setLassoSelected([])
   }
+
+  const handleLassoResult = useCallback((pointsFromLasso = []) => {
+    const additions = Array.isArray(pointsFromLasso) ? pointsFromLasso : []
+    if (additions.length === 0) {
+      setLassoSelected([])
+      return
+    }
+
+    const uniqueMap = new Map()
+    for (const entry of additions) {
+      if (!entry) continue
+      const identifier = entry.id ?? entry.tcr_id
+      if (!identifier || uniqueMap.has(identifier)) continue
+      uniqueMap.set(identifier, entry)
+    }
+
+    setLassoSelected(Array.from(uniqueMap.values()))
+  }, [])
 
   return (
     <Layout style={{ height: '100vh', overflow: 'hidden' }}>
@@ -163,7 +180,7 @@ export default function ExplorePage() {
             onSelect={setSelected}
             isDark={isDark}
             lassoMode={lassoMode}
-            onLassoSelect={setLassoSelected}
+            onLassoSelect={handleLassoResult}
             lassoSelected={lassoSelected}
           />
 

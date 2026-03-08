@@ -56,17 +56,39 @@ export function useExploreData() {
         }
     }, [])
 
-    // ── Poll for ephemeral ingested points (pipeline may still be running) ──────
+    // ── Poll for ephemeral ingested points ──────────────────────────────────────
     useEffect(() => {
         if (!backendOk) return
-        const fetch = () =>
+
+        const fetchIngested = () =>
             api.ingestedPoints()
                 .then(pts => setIngestedPoints(pts ?? []))
-                .catch(() => {})
-        fetch()
-        const id = setInterval(fetch, 3000)
+                .catch(() => { })
+
+        // Initial fetch
+        fetchIngested()
+
+        // Conditional polling: only check if there might be updates pending in the worker
+        const poll = async () => {
+            try {
+                const tasks = await api.listTasks()
+                const hasActiveTasks = tasks.some(t =>
+                    t.state === 'RUNNING' || t.state === 'QUEUED'
+                )
+
+                // If there are active tasks, or if we currently HAVE ingested points,
+                // keep polling to stay in sync.
+                if (hasActiveTasks || ingestedPoints.length > 0) {
+                    await fetchIngested()
+                }
+            } catch (err) {
+                // Silently ignore task listing errors, just stop polling effectively
+            }
+        }
+
+        const id = setInterval(poll, 5000)
         return () => clearInterval(id)
-    }, [backendOk])
+    }, [backendOk, ingestedPoints.length])
 
     // ── Search / autocomplete options ────────────────────────────────────────────
     const searchOptions = useMemo(() => {
@@ -141,7 +163,7 @@ export function useExploreData() {
     }
 
     const clearIngestedPoints = () => {
-        api.clearIngested().catch(() => {})
+        api.clearIngested().catch(() => { })
         setIngestedPoints([])
     }
 

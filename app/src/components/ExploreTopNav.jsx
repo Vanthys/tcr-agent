@@ -61,18 +61,13 @@ export default function ExploreTopNav({
         }}>
             {/* Logo / title */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{
-                    width: 28, height: 28, borderRadius: 8,
-                    background: 'linear-gradient(135deg, #4ecdc4, #a29bfe)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 11, fontWeight: 800, color: '#0d0f17',
-                }}>TCR</div>
+                <img src="/icon.svg" alt="Logo" style={{ width: 28, height: 28 }} />
                 <div>
                     <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-main)', lineHeight: 1.2 }}>
-                        TCR Agent
+                        Sentinel
                     </div>
                     <div style={{ fontSize: 10, color: 'var(--text-dim)', lineHeight: 1.2 }}>
-                        AI assisted TCR mapping
+                        AI TCR Explorer
                     </div>
                 </div>
             </div>

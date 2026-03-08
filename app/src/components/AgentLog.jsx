@@ -695,16 +695,16 @@ function SuggestionButtons({ suggestionsText, streaming, tcrId, provider, onJobS
                                         state === 'running' ? 'Running…' : 'Run this analysis'
                             }>
                                 <Button
-                                    type="text" size="small"
+                                    size="large"
+                                    className={`agent-run-button ${state === 'running' ? 'is-running' : state === 'done' ? 'is-done' : state === 'error' ? 'is-error' : ''}`}
                                     icon={
-                                        state === 'running' ? <LoadingOutlined style={{ color: colors.accent }} /> :
-                                            state === 'done' ? <CheckCircleOutlined style={{ color: '#2ecc71' }} /> :
-                                                state === 'error' ? <WarningOutlined style={{ color: '#ff6b6b' }} /> :
-                                                    <PlayCircleOutlined style={{ color: colors.accent }} />
+                                        state === 'running' ? <LoadingOutlined /> :
+                                            state === 'done' ? <CheckCircleOutlined /> :
+                                                state === 'error' ? <WarningOutlined /> :
+                                                    <PlayCircleOutlined />
                                     }
                                     disabled={state !== 'idle'}
                                     onClick={() => startJob(s, idx)}
-                                    style={{ flexShrink: 0 }}
                                 />
                             </Tooltip>
                         </div>

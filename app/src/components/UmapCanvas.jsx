@@ -205,6 +205,9 @@ export default function UmapCanvas({ points, ingestedPoints = [], selectedId, fi
         setViewState(prev => ({ ...prev, target: [(minX + maxX) / 2, (minY + maxY) / 2, 0], zoom: isNaN(zoom) ? 4 : zoom, ...transition }))
     }, [xDim, yDim, scatterData, selectedId, lassoSelected]);
 
+    const selectedStroke = isDark ? [255, 255, 255] : [15, 23, 42]
+    const lassoStroke = isDark ? [64, 224, 192] : [6, 95, 70]
+
     const layers = [
         new ScatterplotLayer({
             id: 'scatterplot-layer',
@@ -218,14 +221,25 @@ export default function UmapCanvas({ points, ingestedPoints = [], selectedId, fi
             radiusMinPixels: 0.5,
             radiusMaxPixels: 15,
             getPosition: d => d.position,
-            getFillColor: d => d.color,
-            getLineColor: d => d.isSelected ? (isDark ? [255, 255, 255] : [0, 0, 0]) : d.color,
-            getRadius: d => d.isSelected ? 6 : 2, // Now strictly 2px and 6px wide on screen
-            getLineWidth: d => d.isSelected || d.isLassoed ? 1.5 : 0,
+            getFillColor: d => {
+                if (d.isSelected) return d.color
+                if (d.isLassoed) {
+                    return [
+                        Math.min((d.color?.[0] ?? 0) + 28, 255),
+                        Math.min((d.color?.[1] ?? 0) + 28, 255),
+                        Math.min((d.color?.[2] ?? 0) + 28, 255),
+                        220,
+                    ]
+                }
+                return d.color
+            },
+            getLineColor: d => d.isSelected ? selectedStroke : d.isLassoed ? lassoStroke : d.color,
+            getRadius: d => d.isSelected ? 7 : d.isLassoed ? 4.2 : 2,
+            getLineWidth: d => d.isSelected ? 2.4 : d.isLassoed ? 2 : 0,
             updateTriggers: {
-                getFillColor: [isDark],
-                getLineColor: [selectedId, isDark],
-                getRadius: [selectedId],
+                getFillColor: [isDark, lassoSet],
+                getLineColor: [selectedId, isDark, lassoSet],
+                getRadius: [selectedId, lassoSet],
                 getLineWidth: [selectedId, lassoSet]
             },
             onHover: info => setHoverInfo(info),
@@ -246,9 +260,9 @@ export default function UmapCanvas({ points, ingestedPoints = [], selectedId, fi
             radiusUnits: 'pixels',
             getPosition: d => d.position,
             getFillColor: [0, 0, 0],
-            getRadius: 14,
+            getRadius: 6,
         }),
-        // Gold ingested points — large and prominent
+        // Gold ingested points — small and subtle
         ingestedData.length > 0 && new ScatterplotLayer({
             id: 'ingested-overlay',
             data: ingestedData,
@@ -261,8 +275,8 @@ export default function UmapCanvas({ points, ingestedPoints = [], selectedId, fi
             getPosition: d => d.position,
             getFillColor: [255, 185, 0],       // bright gold fill
             getLineColor: [255, 255, 255],     // white ring
-            getRadius: 10,
-            getLineWidth: 2.5,
+            getRadius: 4,
+            getLineWidth: 1.5,
             onHover: info => setHoverInfo(info),
             onClick: info => { if (info.object && onSelect) onSelect(info.object) },
         }),

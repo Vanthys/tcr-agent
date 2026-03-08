@@ -1,0 +1,31 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="tcrGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#005EB8;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#00D1B2;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <path d="M70,160 Q60,110 90,80 Q110,60 90,40 Q70,20 50,40 Q30,60 50,80 Q70,100 80,130" 
+        fill="none" 
+        stroke="url(#tcrGradient)" 
+        stroke-width="8" 
+        stroke-linecap="round"/>
+
+  <path d="M130,160 Q140,110 110,80 Q90,60 110,40 Q130,20 150,40 Q170,60 150,80 Q130,100 120,130" 
+        fill="none" 
+        stroke="url(#tcrGradient)" 
+        stroke-width="8" 
+        stroke-linecap="round"/>
+
+  <circle cx="90" cy="80" r="5" fill="#005EB8" />
+  <circle cx="110" cy="80" r="5" fill="#00D1B2" />
+  <circle cx="100" cy="55" r="4" fill="#0096B5" />
+  
+  <path d="M50,170 Q100,155 150,170" 
+        fill="none" 
+        stroke="#CCCCCC" 
+        stroke-width="4" 
+        stroke-linecap="round" 
+        stroke-dasharray="2,6"/>
+</svg>

@@ -71,7 +71,8 @@ export const api = {
         })
     },
     ingestedPoints: () => get('/umap/ingested'),
-    clearIngested: () => fetch(new URL('/umap/ingested'), { method: 'DELETE' }).then(r => r.json()),
+    clearIngested: () => fetch(resolveUrl('/umap/ingested'), { method: 'DELETE' }).then(r => r.json()),
+    listTasks: () => get('/worker/status'),
     tcr: (id) => get(`/tcr/${encodeURIComponent(id)}`),
     mutagenesis: (id, params = {}) => get(`/mutagenesis/${encodeURIComponent(id)}`, params),
     epitopeDistribution: () => get('/epitope_distribution'),

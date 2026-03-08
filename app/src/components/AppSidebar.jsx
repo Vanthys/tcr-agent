@@ -66,7 +66,7 @@ export default function AppSidebar({ stats, provider, onProviderChange, category
                         </span>
                     </div>
                     <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 4, lineHeight: 1.3 }}>
-                        Shown as gold dots on UMAP
+                        Shown as gold dots on Canvas
                     </div>
                 </div>
             )}

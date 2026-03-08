@@ -4,7 +4,7 @@
  * Shows CDR3, V/J genes, source, epitope, prediction bars,
  * neighbor list, and triggers the agent log.
  */
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Button, Divider, Tag, Skeleton, Tooltip, Tabs } from 'antd'
 import { RobotOutlined, ReloadOutlined } from '@ant-design/icons'
 import { api } from '../api'
@@ -32,7 +32,7 @@ const SOURCE_LABELS = {
     T: 'TCRAFT', V: 'VDJdb', P: 'PDAC', A: 'AD CSF', M: 'McPAS',
 }
 
-export default function TcrDetail({ point, provider, onClose }) {
+export default function TcrDetail({ point, provider, onClose, lassoSelected = [] }) {
     const [detail, setDetail] = useState(null)
     const [mutagenesisEntries, setMutagenesisEntries] = useState([])
     const [mutagenesisActiveEpitope, setMutagenesisActiveEpitope] = useState(null)
@@ -42,6 +42,19 @@ export default function TcrDetail({ point, provider, onClose }) {
     const [agentKey, setAgentKey] = useState(0)
 
     const tcrId = point?.id ?? point?.tcr_id
+    const lassoNeighborIds = useMemo(() => {
+        if (!lassoSelected?.length || !tcrId) return []
+        const seen = new Set()
+        const ids = []
+        for (const entry of lassoSelected) {
+            if (!entry) continue
+            const id = entry.id ?? entry.tcr_id
+            if (!id || id === tcrId || seen.has(id)) continue
+            seen.add(id)
+            ids.push(id)
+        }
+        return ids
+    }, [lassoSelected, tcrId])
 
     useEffect(() => {
         if (!tcrId) return
@@ -180,12 +193,11 @@ export default function TcrDetail({ point, provider, onClose }) {
                 </div>
             ) : (
                 <Button
-                    type="primary"
                     icon={<RobotOutlined />}
                     onClick={() => { setShowAgent(true); setAgentKey(k => k + 1) }}
-                    className="glow-active"
                     block
-                    style={{ background: 'linear-gradient(135deg, var(--color-primary), var(--color-accent))', border: 'none' }}
+                    size="large"
+                    className="agent-cta-button"
                 >
                     Analyse with Agent
                 </Button>
@@ -301,7 +313,11 @@ export default function TcrDetail({ point, provider, onClose }) {
             <Divider style={{ margin: '4px 0', borderColor: 'var(--border)' }} />
 
             {/* ── Synthesis export ── */}
-            <SynthesisExport tcrId={tcrId} epitope={epitope || predictions[0]?.epitope_name} />
+            <SynthesisExport
+                tcrId={lassoNeighborIds.length === 0 ? tcrId : undefined}
+                tcrIds={lassoNeighborIds.length > 0 ? [tcrId, ...lassoNeighborIds] : undefined}
+                epitope={epitope || predictions[0]?.epitope_name}
+            />
         </div>
     )
 }

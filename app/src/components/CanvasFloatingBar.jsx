@@ -4,7 +4,6 @@
  * Contains the lasso toggle, dimension slider, and a hint text.
  */
 import { Button, Tooltip, Slider } from 'antd'
-import { DragOutlined } from '@ant-design/icons'
 
 export default function CanvasFloatingBar({
     visible,
@@ -32,7 +31,7 @@ export default function CanvasFloatingBar({
                 <Button
                     shape="circle"
                     type={lassoMode ? 'primary' : 'text'}
-                    icon={<DragOutlined />}
+                    icon={<LassoGlyph active={lassoMode} />}
                     onClick={onLassoToggle}
                     style={lassoMode
                         ? { background: 'var(--color-primary)', border: 'none' }
@@ -69,5 +68,25 @@ export default function CanvasFloatingBar({
                 </>
             )}
         </div>
+    )
+}
+
+function LassoGlyph({ active }) {
+    return (
+        <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ display: 'block', color: active ? 'var(--bg-base)' : 'currentColor' }}
+        >
+            <path d="M4 10c0-4 4-7 8-7s8 3 8 7-4 6-8 6c-1.8 0-3.3-.4-4.4-1.1" />
+            <path d="M9 15.5 6.2 21" />
+            <circle cx="5.5" cy="22" r="1" />
+        </svg>
     )
 }
