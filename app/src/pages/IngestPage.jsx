@@ -3,6 +3,7 @@ import { Layout, Button, Typography, Steps, Upload, Card, message, Progress, Spa
 import { InboxOutlined, ArrowLeftOutlined } from '@ant-design/icons'
 import { ThemeContext } from '../main'
 import { useNavigate } from 'react-router-dom'
+import { api } from '../api'
 
 const { Header, Content } = Layout
 const { Title, Text } = Typography
@@ -21,8 +22,7 @@ export default function IngestPage() {
         if (taskId && currentStep > 0 && taskStatus?.state !== 'COMPLETED' && taskStatus?.state !== 'FAILED') {
             interval = setInterval(async () => {
                 try {
-                    const res = await fetch(`http://localhost:3001/api/worker/status/${taskId}`)
-                    const data = await res.json()
+                    const data = await api.getWorkerTask(taskId)
                     setTaskStatus(data)
                     if (data.state === 'COMPLETED') {
                         message.success('Pipeline finished! UMAP updated.')
@@ -42,7 +42,7 @@ export default function IngestPage() {
     const uploadProps = {
         name: 'file',
         multiple: false,
-        action: 'http://localhost:3001/api/worker/ingest',
+        action: '/api/worker/ingest',
         onChange(info) {
             const { status } = info.file;
             if (status === 'done') {

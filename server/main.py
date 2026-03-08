@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from core.config import settings
 from core.lifespan import lifespan
-from routers import annotate, health, mutagenesis, stats, tcr, umap, synthesis, null_distribution, worker
+from routers import chat, health, mutagenesis, stats, tcr, umap, synthesis, null_distribution, worker
 
 logging.basicConfig(
     level=logging.INFO,
@@ -45,7 +45,7 @@ app.include_router(health.router)
 app.include_router(umap.router)
 app.include_router(tcr.router)
 app.include_router(mutagenesis.router)
-app.include_router(annotate.router)
+app.include_router(chat.router)
 app.include_router(stats.router)
 
 app.include_router(worker.router)

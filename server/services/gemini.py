@@ -7,8 +7,8 @@ The router forwards these as SSE events directly to the browser.
 
 from __future__ import annotations
 
-import json
 import logging
+import os
 from typing import AsyncGenerator
 
 from core.config import settings
@@ -20,13 +20,11 @@ logger = logging.getLogger(__name__)
 async def stream_annotation(
     full_context: str,
     question: str | None = None,
-) -> AsyncGenerator[dict, None]:
-    """
-    Yield dicts representing SSE events containing text chunks from Gemini.
-    """
+) -> AsyncGenerator[str, None]:
+    """Yield raw text chunks from Gemini."""
     api_key = settings.gemini_api_key
     if not api_key:
-        yield {"data": "[error] GEMINI_API_KEY is not set on the server."}
+        yield "[error] GEMINI_API_KEY is not set on the server."
         return
 
     user_message = (
@@ -40,13 +38,6 @@ async def stream_annotation(
         from google.genai import types
 
         client = genai.Client(api_key=api_key)
-        
-        # Signal UI that we are streaming synthesize text
-        yield {
-            "event": "step",
-            "data": json.dumps({"step": "synthesis", "action": "SYNTHESIZE", "label": "Gemini Synthesis", "provider": "gemini"})
-        }
-
         # We must use generate_content_stream for streaming tokens.
         # We configure the model with the system instruction.
         response = client.models.generate_content_stream(
@@ -63,11 +54,11 @@ async def stream_annotation(
         # However, FastAPI handles these nicely.
         for chunk in response:
             if chunk.text:
-                yield {"event": "text", "data": json.dumps(chunk.text)}
+                yield chunk.text
 
     except Exception as exc:
         logger.error("Gemini streaming error: %s", exc)
-        yield {"data": f"\n[error] Gemini API error: {exc}"}
+        yield f"\n[error] Gemini API error: {exc}"
 
 async def analyze_tool_result_stream(prompt: str):
     """
@@ -75,6 +66,7 @@ async def analyze_tool_result_stream(prompt: str):
     Does not use the heavy system prompt or JSON structure.
     """
     from core.config import settings
+    from google import genai
     # Ensure Gemini is initialized
     if not os.environ.get("GOOGLE_API_KEY"):
         genai.configure(api_key=settings.gemini_api_key)

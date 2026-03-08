@@ -24,7 +24,7 @@ export default function PdbViewer({ tcrId }) {
 
             const options = {
                 customData: {
-                    url: `http://localhost:3001/data/predictions/boltz2/result-${tcrId}/predictions/result/result_model_0.pdb`,
+                    url: `/data/predictions/boltz2/result-${tcrId}/predictions/result/result_model_0.pdb`,
                     format: 'pdb',
                 },
                 bgColor: isDark ? { r: 10, g: 12, b: 18 } : { r: 220, g: 220, b: 220 }, // Matches var(--bg-surface) for light and dark

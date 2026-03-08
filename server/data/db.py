@@ -8,6 +8,7 @@ import logging
 from pathlib import Path
 import json
 from datetime import datetime, timezone
+from uuid import uuid4
 from sqlalchemy import create_engine, text
 from core.config import settings
 
@@ -155,4 +156,219 @@ def append_followup(tcr_id: str, provider: str, followup: dict) -> None:
             UPDATE agent_chats SET payload = :payload WHERE tcr_id = :tcr_id AND provider = :provider
         """), {"tcr_id": tcr_id, "provider": provider, "payload": json.dumps(payload)})
     logger.info("Appended followup message for %s (%s)", tcr_id, provider)
+
+
+# ── Chat session (message-based) storage ──────────────────────────────────────
+
+def init_chat_messages_table() -> None:
+    """Create the agent_chat_messages table for durable stage logging."""
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS agent_chat_messages (
+                message_id TEXT PRIMARY KEY,
+                tcr_id     TEXT NOT NULL,
+                provider   TEXT NOT NULL,
+                status     TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                data       TEXT NOT NULL
+            )
+        """))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_chat_messages_tcr ON agent_chat_messages (tcr_id)"
+        ))
+    logger.info("agent_chat_messages table ready")
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _load_chat_row(message_id: str):
+    with engine.connect() as conn:
+        row = conn.execute(text("""
+            SELECT message_id, tcr_id, provider, status, created_at, updated_at, data
+            FROM agent_chat_messages WHERE message_id = :message_id
+        """), {"message_id": message_id}).mappings().fetchone()
+    return row
+
+
+def create_chat_message_record(tcr_id: str, provider: str) -> dict:
+    """Create a new chat session row and return its metadata."""
+    message_id = uuid4().hex
+    now = _now_iso()
+    data = {
+        "stages": {},
+        "stage_order": [],
+        "chunks": [],
+        "followups": [],
+    }
+    payload = json.dumps(data)
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO agent_chat_messages (message_id, tcr_id, provider, status, created_at, updated_at, data)
+            VALUES (:message_id, :tcr_id, :provider, :status, :created_at, :updated_at, :data)
+        """), {
+            "message_id": message_id,
+            "tcr_id": tcr_id,
+            "provider": provider,
+            "status": "running",
+            "created_at": now,
+            "updated_at": now,
+            "data": payload,
+        })
+    return {
+        "message_id": message_id,
+        "tcr_id": tcr_id,
+        "provider": provider,
+        "status": "running",
+        "created_at": now,
+        "updated_at": now,
+        "data": data,
+    }
+
+
+def _persist_chat_data(message_id: str, data: dict, status: str | None = None, error: str | None = None) -> None:
+    now = _now_iso()
+    if error is not None:
+        data.setdefault("meta", {})["error"] = error
+    payload = json.dumps(data)
+    update_fields = {
+        "updated_at": now,
+        "data": payload,
+        "message_id": message_id,
+    }
+    set_clauses = ["updated_at = :updated_at", "data = :data"]
+    if status:
+        update_fields["status"] = status
+        set_clauses.append("status = :status")
+
+    with engine.begin() as conn:
+        conn.execute(text(f"""
+            UPDATE agent_chat_messages
+            SET {", ".join(set_clauses)}
+            WHERE message_id = :message_id
+        """), update_fields)
+
+
+def update_chat_stage(message_id: str, stage_name: str, status: str, detail: str | None = None, payload: dict | None = None, summary: str | None = None) -> dict:
+    """Insert or update a stage entry and persist the change."""
+    row = _load_chat_row(message_id)
+    if row is None:
+        raise ValueError(f"Chat message {message_id} not found")
+    data = json.loads(row["data"])
+    stages = data.setdefault("stages", {})
+    stage_order = data.setdefault("stage_order", [])
+    stage = stages.get(stage_name, {"name": stage_name})
+    now = _now_iso()
+    if "name" not in stage:
+        stage["name"] = stage_name
+    if "created_at" not in stage:
+        stage["created_at"] = now
+    if stage_name not in stage_order:
+        stage_order.append(stage_name)
+
+    stage.update({
+        "status": status,
+        "detail": detail,
+        "payload": payload,
+        "summary": summary,
+        "updated_at": now,
+    })
+    if status == "running" and "started_at" not in stage:
+        stage["started_at"] = now
+    if status in ("done", "error"):
+        stage["finished_at"] = now
+    stages[stage_name] = stage
+
+    _persist_chat_data(message_id, data)
+    return stage
+
+
+def append_chat_chunk(message_id: str, text_chunk: str) -> dict:
+    """Append a streamed LLM chunk to the chat record."""
+    row = _load_chat_row(message_id)
+    if row is None:
+        raise ValueError(f"Chat message {message_id} not found")
+    data = json.loads(row["data"])
+    chunks = data.setdefault("chunks", [])
+    chunk = {
+        "index": len(chunks),
+        "text": text_chunk,
+        "timestamp": _now_iso(),
+    }
+    chunks.append(chunk)
+    _persist_chat_data(message_id, data)
+    return chunk
+
+
+def set_chat_status(message_id: str, status: str, error: str | None = None) -> dict:
+    """Update the message-level status (running/done/failed/canceled)."""
+    row = _load_chat_row(message_id)
+    if row is None:
+        raise ValueError(f"Chat message {message_id} not found")
+    data = json.loads(row["data"])
+    if error is not None:
+        data.setdefault("meta", {})["error"] = error
+    _persist_chat_data(message_id, data, status=status, error=error)
+    return {
+        "message_id": message_id,
+        "status": status,
+        "error": error,
+        "updated_at": _now_iso(),
+    }
+
+
+def append_chat_followup(message_id: str, followup: dict) -> dict:
+    row = _load_chat_row(message_id)
+    if row is None:
+        raise ValueError(f"Chat message {message_id} not found")
+    data = json.loads(row["data"])
+    followups = data.setdefault("followups", [])
+    followups.append(followup)
+    _persist_chat_data(message_id, data)
+    return followup
+
+
+def get_chat_message(message_id: str) -> dict | None:
+    row = _load_chat_row(message_id)
+    if row is None:
+        return None
+    data = json.loads(row["data"])
+    return {
+        "message_id": row["message_id"],
+        "tcr_id": row["tcr_id"],
+        "provider": row["provider"],
+        "status": row["status"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+        "data": data,
+        "error": data.get("meta", {}).get("error"),
+    }
+
+
+def list_chat_messages(limit: int = 50) -> list[dict]:
+    with engine.connect() as conn:
+        rows = conn.execute(text("""
+            SELECT message_id, tcr_id, provider, status, created_at, updated_at
+            FROM agent_chat_messages
+            ORDER BY created_at DESC
+            LIMIT :limit
+        """), {"limit": limit}).fetchall()
+    return [
+        {
+            "message_id": r[0],
+            "tcr_id": r[1],
+            "provider": r[2],
+            "status": r[3],
+            "created_at": r[4],
+            "updated_at": r[5],
+        }
+        for r in rows
+    ]
+
+
+def delete_chat_message(message_id: str) -> None:
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM agent_chat_messages WHERE message_id = :message_id"), {"message_id": message_id})
 

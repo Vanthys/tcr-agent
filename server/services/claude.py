@@ -7,11 +7,9 @@ The router forwards these as SSE events directly to the browser.
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import AsyncGenerator
 
-from core.config import settings
 from core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -69,13 +67,11 @@ Critical rules:
 async def stream_annotation(
     full_context: str,
     question: str | None = None,
-) -> AsyncGenerator[dict, None]:
-    """
-    Yield dicts representing SSE events containing text chunks from Claude.
-    """
+) -> AsyncGenerator[str, None]:
+    """Yield raw text chunks from Claude for the synthesis stage."""
     api_key = settings.anthropic_api_key
     if not api_key:
-        yield {"data": "[error] ANTHROPIC_API_KEY is not set on the server."}
+        yield "[error] ANTHROPIC_API_KEY is not set on the server."
         return
 
     import anthropic
@@ -90,12 +86,6 @@ async def stream_annotation(
     messages = [{"role": "user", "content": user_message}]
 
     try:
-        # Before yielding text, yield the synthesis step indicator
-        yield {
-            "event": "step",
-            "data": json.dumps({"step": "synthesis", "action": "SYNTHESIZE", "label": "Claude Synthesis", "provider": "claude"})
-        }
-
         async with client.messages.stream(
             model=settings.claude_model,
             max_tokens=settings.llm_max_tokens,
@@ -103,11 +93,11 @@ async def stream_annotation(
             messages=messages,
         ) as stream:
             async for text in stream.text_stream:
-                yield {"event": "text", "data": json.dumps(text)}
+                yield text
 
     except Exception as exc:
         logger.error("Claude stream error: %s", exc)
-        yield {"data": f"\n[error] Claude API error: {exc}"}
+        yield f"\n[error] Claude API error: {exc}"
 
 async def analyze_tool_result_stream(prompt: str):
     """

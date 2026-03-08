@@ -6,6 +6,17 @@ import time
 from uuid import uuid4
 from pathlib import Path
 
+import pandas as pd
+
+from core.chat_stream import publish as publish_chat_event
+from data.db import (
+    append_chat_chunk,
+    update_chat_stage,
+    set_chat_status,
+)
+from data.store import get_store
+from services import claude, gemini, tools
+
 logger = logging.getLogger(__name__)
 
 class TaskState(str, Enum):
@@ -60,6 +71,150 @@ def update_task_state(task_id: str, state: TaskState, result=None, error=None, p
         if result is not None: t.result = result
         if error is not None: t.error = error
         if progress is not None: t.progress = progress
+
+
+# ── Chat session orchestration ────────────────────────────────────────────────
+
+def start_chat_session(message_id: str, tcr_id: str, provider: str, question: str | None = None) -> None:
+    """Kick off the asynchronous agent pipeline for a chat session."""
+    asyncio.create_task(_run_chat_session(message_id, tcr_id, provider, question))
+
+
+def _publish_stage(message_id: str, stage: dict) -> None:
+    publish_chat_event(message_id, {"type": "stage", **stage})
+
+
+def _record_stage(message_id: str, name: str, status: str, detail: str | None = None, payload: dict | None = None, summary: str | None = None) -> dict:
+    stage = update_chat_stage(
+        message_id,
+        stage_name=name,
+        status=status,
+        detail=detail,
+        payload=payload,
+        summary=summary,
+    )
+    _publish_stage(message_id, stage)
+    return stage
+
+
+def _record_chunk(message_id: str, text_chunk: str) -> dict:
+    chunk = append_chat_chunk(message_id, text_chunk)
+    publish_chat_event(message_id, {"type": "chunk", **chunk})
+    return chunk
+
+
+def _record_status(message_id: str, status: str, error: str | None = None) -> None:
+    set_chat_status(message_id, status=status, error=error)
+    publish_chat_event(message_id, {"type": "status", "status": status, "error": error})
+
+
+async def _run_chat_session(message_id: str, tcr_id: str, provider: str, question: str | None = None) -> None:
+    """Execute the main agent stages and stream updates via the chat_store."""
+    store = get_store()
+    executor = tools.ToolExecutor(store)
+
+    try:
+        # Validate TCR exists
+        tcr_row = None
+        if not store.tcr_db.empty:
+            row = store.tcr_db[store.tcr_db["tcr_id"] == tcr_id]
+            if row.empty:
+                raise ValueError(f"TCR '{tcr_id}' not found in database")
+            tcr_row = row.iloc[0]
+
+        context_parts = []
+        if tcr_row is not None:
+            header = _format_tcr_header(tcr_row, tcr_id)
+        else:
+            header = f"TCR ID: {tcr_id}"
+        context_parts.append(header)
+
+        # Stage 1 — neighbors
+        _record_stage(message_id, "neighbors", "running", detail="Retrieving spatial nearest neighbors...")
+        try:
+            n_res = executor.execute("search_neighbors", {"tcr_id": tcr_id, "k": 25})
+            top_n = n_res.get("top_neighbors", [])
+            context_parts.append(_format_neighbors(top_n))
+            _record_stage(
+                message_id,
+                "neighbors",
+                "done",
+                summary=n_res.get("summary"),
+                payload={"neighbors": top_n},
+            )
+        except Exception as exc:
+            logger.error("Neighbor search failed: %s", exc)
+            _record_stage(message_id, "neighbors", "error", detail=str(exc))
+
+        # Stage 2 — predictions
+        _record_stage(message_id, "predictions", "running", detail="Computing DecoderTCR scores...")
+        try:
+            p_res = executor.execute("get_predictions", {"tcr_id": tcr_id})
+            top_p = p_res.get("top_predictions", [])
+            context_parts.append(_format_predictions(top_p))
+            _record_stage(
+                message_id,
+                "predictions",
+                "done",
+                summary=p_res.get("summary"),
+                payload={"predictions": top_p},
+            )
+        except Exception as exc:
+            logger.error("Prediction lookup failed: %s", exc)
+            _record_stage(message_id, "predictions", "error", detail=str(exc))
+
+        # Stage 3 — mutagenesis
+        _record_stage(message_id, "mutagenesis", "running", detail="Checking for mutation landscape...")
+        try:
+            m_res = executor.execute("get_mutagenesis", {"tcr_id": tcr_id})
+            if m_res.get("available"):
+                context_parts.append(_format_mutagenesis(m_res))
+                _record_stage(
+                    message_id,
+                    "mutagenesis",
+                    "done",
+                    summary="Mutation landscape retrieved from cache.",
+                    payload=m_res,
+                )
+            else:
+                context_parts.append("## Mutagenesis\nNo pre-computed mutation landscape exists for this TCR.")
+                _record_stage(
+                    message_id,
+                    "mutagenesis",
+                    "done",
+                    summary="No pre-computed landscape found.",
+                    payload={"available": False},
+                )
+        except Exception as exc:
+            logger.error("Mutagenesis lookup failed: %s", exc)
+            _record_stage(message_id, "mutagenesis", "error", detail=str(exc))
+
+        # Combine context and stream LLM synthesis
+        full_context = "\n\n".join(filter(None, context_parts))
+        provider_stream = (
+            gemini.stream_annotation(full_context=full_context, question=question)
+            if provider == "gemini"
+            else claude.stream_annotation(full_context=full_context, question=question)
+        )
+
+        _record_stage(
+            message_id,
+            "synthesis",
+            "running",
+            detail=f"Streaming {provider.title()} synthesis...",
+        )
+        async for chunk_text in provider_stream:
+            if not chunk_text:
+                continue
+            _record_chunk(message_id, chunk_text)
+
+        _record_stage(message_id, "synthesis", "done")
+        _record_status(message_id, "done")
+
+    except Exception as exc:
+        logger.exception("Chat session %s failed: %s", message_id, exc)
+        _record_stage(message_id, "synthesis", "error", detail=str(exc))
+        _record_status(message_id, "failed", error=str(exc))
 
 async def _run_umap_recompute(task_id: str):
     import sys
@@ -414,3 +569,74 @@ def start_suggestion_job(tcr_id: str, provider: str, suggestion: dict):
 
     else:
         raise ValueError(f"Unknown suggestion type: {stype!r}")
+
+
+# ── Formatting helpers (shared with chat pipeline) ───────────────────────────
+
+def _format_tcr_header(row, tcr_id: str) -> str:
+    parts = [f"TCR ID: {tcr_id}"]
+    for col, label in [
+        ("CDR3b", "CDR3β"),
+        ("CDR3a", "CDR3α"),
+        ("TRBV", "TRBV"),
+        ("TRAV", "TRAV"),
+        ("source", "Source"),
+        ("disease_context", "Disease"),
+        ("known_epitope", "Known epitope"),
+        ("antigen_category", "Antigen category"),
+    ]:
+        val = row.get(col)
+        if val is not None and not _is_na(val):
+            parts.append(f"{label}: {val}")
+    return "\n".join(parts)
+
+
+def _format_neighbors(neighbors: list[dict]) -> str:
+    lines = ["## Nearest Neighbors (ESM-2 cosine similarity)"]
+    for n in neighbors:
+        ep = f" | epitope: {n['known_epitope']}" if n.get("known_epitope") else ""
+        lines.append(
+            f"  {n['tcr_id']} sim={n['similarity']:.3f}"
+            f" src={n.get('source', '?')}{ep}"
+        )
+    return "\n".join(lines)
+
+
+def _format_predictions(predictions: list[dict]) -> str:
+    lines = ["## DecoderTCR Binding Predictions (top epitopes)"]
+    for p in predictions:
+        lines.append(
+            f"  {p.get('epitope_name', '?')} "
+            f"score={p.get('interaction_score', 0):.4f} "
+            f"cat={p.get('epitope_category', '?')}"
+        )
+    return "\n".join(lines)
+
+
+def _format_mutagenesis(m: dict) -> str:
+    lines = [
+        "## In Silico CDR3 Mutation Landscape",
+        f"Epitope: {m.get('epitope')} | Wild-type score: {m.get('wild_type_score')}",
+        f"CDR3β: {m.get('cdr3b')}",
+        "Top predicted variants (Δ = score change vs wild-type):",
+    ]
+    for v in m.get("top_variants", [])[:5]:
+        score = v.get("predicted_score", 0)
+        lines.append(
+            f"  {v.get('mutations')} → score {score:.4f}"
+            f" (Δ{v.get('delta', 0):+.4f}) — {v.get('note', 'hypothesis')}"
+        )
+    others = [ep for ep in m.get("epitope_options", []) if ep and ep != m.get("epitope")]
+    if others:
+        joined = ", ".join(others[:5])
+        if len(others) > 5:
+            joined += ", …"
+        lines.append(f"Other cached epitopes: {joined}")
+    return "\n".join(lines)
+
+
+def _is_na(val) -> bool:
+    try:
+        return pd.isna(val)
+    except (TypeError, ValueError):
+        return False

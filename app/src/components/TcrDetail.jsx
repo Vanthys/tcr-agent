@@ -66,10 +66,6 @@ export default function TcrDetail({ point, provider, onClose }) {
             .catch(() => setMutagenesisEntries([]))
             .finally(() => setLoadingMutagenesis(false))
 
-        // Auto-show AgentLog if a cached session exists
-        api.getChatCacheStatus(tcrId, provider)
-            .then(({ cached }) => { if (cached) setShowAgent(true) })
-            .catch(() => { })
     }, [tcrId, provider])
 
     if (!point) return null

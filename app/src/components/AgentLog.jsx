@@ -2,7 +2,7 @@
  * AgentLog.jsx — The "wow" panel.
  */
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { Button, Spin, Modal, Collapse, Popconfirm, Tooltip } from 'antd'
+import { Button, Spin, Modal, Collapse, Tooltip } from 'antd'
 import {
     SearchOutlined,
     ThunderboltOutlined,
@@ -10,10 +10,9 @@ import {
     RobotOutlined,
     CloseOutlined,
     ExpandAltOutlined,
-    DeleteOutlined,
     CheckCircleOutlined,
 } from '@ant-design/icons'
-import { streamAnnotate, api } from '../api'
+import { api } from '../api'
 import ReactMarkdown from 'react-markdown'
 import { PlayCircleOutlined, LoadingOutlined, WarningOutlined } from '@ant-design/icons'
 
@@ -54,126 +53,217 @@ const MODAL_MARKDOWN_COMPONENTS = {
     li: ({ node, ...props }) => <li style={{ margin: '4px 0' }} {...props} />,
 }
 
-export default function AgentLog({ tcrId, provider, onClose, onDelete }) {
+export default function AgentLog({ tcrId, provider, onClose, messageId: presetMessageId }) {
     const [lines, setLines] = useState([])
     const [streaming, setStreaming] = useState(false)
     const [claudeText, setClaudeText] = useState('')
     const [done, setDone] = useState(false)
     const [isExpanded, setIsExpanded] = useState(false)
-    const [cachedAt, setCachedAt] = useState(null)
-    const [isClearing, setIsClearing] = useState(false)
-    const [refreshKey, setRefreshKey] = useState(0)
-    // activeJobs: [{id, label, state:'running'|'done'|'error', result, error}]
+    const [messageId, setMessageId] = useState(null)
     const [activeJobs, setActiveJobs] = useState([])
     const [followups, setFollowups] = useState([])
     const abortRef = useRef(null)
+    const reconnectTimerRef = useRef(null)
     const logBodyRef = useRef(null)
     const modalBodyRef = useRef(null)
     const seenStepsRef = useRef(new Set())
-    const forceRefreshRef = useRef(false)
+    const stageLogRef = useRef(new Map())
+    const jobLabelsRef = useRef(new Map())
+    const statusRef = useRef('idle')
 
     const appendLine = useCallback((line) => {
         setLines(prev => [...prev, line])
     }, [])
 
-    useEffect(() => {
-        if (!tcrId) return
+    const handleStageEvent = useCallback((stage) => {
+        if (!stage?.name) return
+        const stepKey = stage.name
+        if (!seenStepsRef.current.has(stepKey)) {
+            seenStepsRef.current.add(stepKey)
+            if (stepKey === 'synthesis') {
+                const label = stage.label || (provider === 'gemini' ? 'Gemini Synthesis' : 'Claude Synthesis')
+                appendLine({ type: 'step', step: 'synthesis', meta: { ...STEP_META.synthesis, label } })
+                appendLine({ type: 'claude-start' })
+            } else {
+                const meta = STEP_META[stepKey] ?? { label: stepKey, icon: <RobotOutlined />, color: 'var(--text-dim)' }
+                appendLine({ type: 'step', step: stepKey, meta })
+            }
+        }
 
-        // Reset state
-        setLines([{ type: 'detail', content: 'Initializing agent session...' }])
+        const stageState = stageLogRef.current.get(stepKey) ?? { detailLogged: false, finalLogged: false }
+        if (stage.detail && !stageState.detailLogged) {
+            appendLine({ type: 'detail', content: `▸ ${stage.detail}` })
+            stageState.detailLogged = true
+        }
+
+        const isFinal = stage.status === 'done' || stage.status === 'error'
+        if (!isFinal || stageState.finalLogged) {
+            stageLogRef.current.set(stepKey, stageState)
+            return
+        }
+
+        if (stage.summary) appendLine({ type: 'summary', content: stage.summary })
+
+        const payload = stage?.payload ?? {}
+
+        if (Array.isArray(payload.neighbors) && payload.neighbors.length > 0) {
+            payload.neighbors
+                .slice(0, 3)
+                .forEach(n => {
+                    const sim = typeof n?.similarity === 'number' ? n.similarity.toFixed(3) : '?'
+                    const pieces = [
+                        n?.tcr_id ? `ID ${n.tcr_id}` : null,
+                        `sim=${sim}`,
+                        n?.known_epitope ? `epitope:${n.known_epitope}` : null,
+                    ].filter(Boolean)
+                    appendLine({ type: 'detail', content: `▸ ${pieces.join(' · ')}` })
+                })
+        }
+
+        if (Array.isArray(payload.predictions) && payload.predictions.length > 0) {
+            payload.predictions
+                .slice(0, 3)
+                .forEach(p => {
+                    const score = typeof p?.interaction_score === 'number'
+                        ? p.interaction_score.toFixed(3)
+                        : 'N/A'
+                    const label = p?.epitope_name ?? 'Prediction'
+                    appendLine({ type: 'detail', content: `▸ ${label} score=${score}` })
+                })
+        }
+
+        if (Array.isArray(payload.top_variants) && payload.top_variants.length > 0) {
+            payload.top_variants
+                .slice(0, 3)
+                .forEach(v => {
+                    const muts = v?.mutations ?? 'variant'
+                    const delta = typeof v?.delta === 'number' ? `Δ${v.delta.toFixed(3)}` : ''
+                    const score = typeof v?.predicted_score === 'number' ? `score ${v.predicted_score.toFixed(3)}` : ''
+                    const note = v?.note ? `(${v.note})` : ''
+                    const pieces = [muts, score, delta, note].filter(Boolean).join(' ')
+                    appendLine({ type: 'detail', content: `▸ ${pieces}` })
+                })
+        }
+
+        stageState.finalLogged = true
+        stageLogRef.current.set(stepKey, stageState)
+    }, [appendLine, provider])
+
+    const handleStreamEvent = useCallback((event, raw) => {
+        if (!raw) return
+        try {
+            const payload = JSON.parse(raw)
+            if (event === 'stage') {
+                handleStageEvent(payload)
+            } else if (event === 'chunk') {
+                setClaudeText(prev => prev + (payload.text ?? ''))
+            } else if (event === 'status') {
+                statusRef.current = payload.status
+                if (payload.status === 'done') {
+                    setStreaming(false)
+                    setDone(true)
+                } else if (payload.status === 'failed') {
+                    setStreaming(false)
+                    appendLine({ type: 'error', content: payload.error || 'Agent run failed' })
+                } else {
+                    setStreaming(true)
+                }
+            } else if (event === 'followup') {
+                setFollowups(prev => [...prev, payload])
+            }
+        } catch {
+            // ignore
+        }
+    }, [appendLine, handleStageEvent])
+
+    const handleJobStart = useCallback((jobId, label) => {
+        jobLabelsRef.current.set(jobId, label)
+        setActiveJobs(js => [...js, { id: jobId, label, state: 'running' }])
+    }, [])
+
+    const handleJobDone = useCallback((jobId, label, result) => {
+        setActiveJobs(js => js.map(j => j.id === jobId ? { ...j, state: 'done', result } : j))
+        jobLabelsRef.current.delete(jobId)
+        if (typeof result === 'string' && result.trim()) {
+            appendLine({ type: 'job-result', label, content: result.trim() })
+        }
+    }, [appendLine])
+
+    const handleJobError = useCallback((jobId, label, error) => {
+        setActiveJobs(js => js.map(j => j.id === jobId ? { ...j, state: 'error', error } : j))
+        jobLabelsRef.current.delete(jobId)
+        if (error) appendLine({ type: 'error', content: `${label}: ${error}` })
+    }, [appendLine])
+
+    const startStream = useCallback((msgId) => {
+        if (!msgId) return
+        statusRef.current = 'running'
+        setStreaming(true)
+        if (abortRef.current) abortRef.current.abort()
+        abortRef.current = api.streamChat(msgId, {
+            onEvent: (event, data) => handleStreamEvent(event, data),
+            onError: () => {},
+            onClose: () => {
+                if (statusRef.current === 'running') {
+                    reconnectTimerRef.current = setTimeout(() => startStream(msgId), 1200)
+                } else {
+                    setStreaming(false)
+                }
+            }
+        })
+    }, [handleStreamEvent])
+
+    useEffect(() => {
+        if (!tcrId && !presetMessageId) return
+
+        let cancelled = false
+        const intro = presetMessageId ? 'Loading saved agent session...' : 'Initializing agent session...'
+        setLines([{ type: 'detail', content: intro }])
         setClaudeText('')
         setDone(false)
         setStreaming(true)
-        setCachedAt(null)
+        setMessageId(null)
         setFollowups([])
         seenStepsRef.current = new Set()
+        stageLogRef.current = new Map()
+        jobLabelsRef.current = new Map()
+        statusRef.current = 'running'
 
         if (abortRef.current) abortRef.current.abort()
+        if (reconnectTimerRef.current) {
+            clearTimeout(reconnectTimerRef.current)
+            reconnectTimerRef.current = null
+        }
 
-        const isForceRefresh = forceRefreshRef.current
-        abortRef.current = streamAnnotate(tcrId, null, provider, (type, data) => {
-            if (type === 'step') {
-                // Determine if we need a new header
-                let stepKey = data.step
-                if (data.step === 'legacy_step') stepKey = `legacy_${data.action}`
-
-                if (!seenStepsRef.current.has(stepKey)) {
-                    seenStepsRef.current.add(stepKey)
-
-                    if (data.step === 'synthesis') {
-                        const label = data.provider === 'gemini' ? 'Gemini Synthesis' : 'Claude Synthesis'
-                        appendLine({ type: 'step', step: 'synthesis', meta: { ...STEP_META.synthesis, label } })
-                        appendLine({ type: 'claude-start' })
-                    } else if (data.step === 'legacy_step') {
-                        const baseMeta = LEGACY_ACTION_META[data.action] ?? { icon: <RobotOutlined />, color: '#a29bfe' }
-                        appendLine({ type: 'step', step: data.step, meta: { ...baseMeta, label: data.label } })
-                    } else {
-                        const meta = STEP_META[data.step] ?? { label: data.step, icon: <RobotOutlined />, color: 'var(--text-dim)' }
-                        appendLine({ type: 'step', step: data.step, meta })
-                    }
-                }
-
-                // Append content details (don't repeat action/label headers)
-                if (data.detail) {
-                    appendLine({ type: 'detail', content: `  → ${data.detail}` })
-                }
-                if (data.summary) {
-                    appendLine({ type: 'summary', content: data.summary })
-                }
-
-                // Tool Results (Unified for legacy and live)
-                if (data.neighbors?.length) {
-                    data.neighbors.filter(n => n.known_epitope).slice(0, 3).forEach(n => {
-                        appendLine({
-                            type: 'detail',
-                            content: `  → ${n.tcr_id} sim=${Number(n.similarity).toFixed(4)} epitope: ${n.known_epitope}`,
-                        })
-                    })
-                }
-                if (data.top?.length) {
-                    data.top.slice(0, 3).forEach(p => {
-                        appendLine({
-                            type: 'detail',
-                            content: `  → ${p.epitope_name} score=${p.interaction_score?.toFixed(4)}`,
-                        })
-                    })
-                }
-                if (data.top_variants?.length) {
-                    data.top_variants.slice(0, 3).forEach(v => {
-                        appendLine({
-                            type: 'detail',
-                            content: `  → variant ${v.mutations} Δ${v.delta?.toFixed(4)}`,
-                        })
-                    })
-                }
-
-            } else if (type === 'text') {
-                setClaudeText(prev => prev + data)
-
-            } else if (type === 'cached') {
-                setCachedAt(data?.cached_at ?? 'unknown')
-
-            } else if (type === 'followup') {
-                try {
-                    const parsed = JSON.parse(data)
-                    setFollowups(prev => [...prev, parsed])
-                } catch { }
-
-            } else if (type === 'done') {
-                setStreaming(false)
-                setDone(true)
-
-            } else if (type === 'error') {
-                appendLine({ type: 'error', content: String(data) })
-                setStreaming(false)
+        const boot = async () => {
+            if (presetMessageId) {
+                setMessageId(presetMessageId)
+                startStream(presetMessageId)
+                return
             }
-        }, isForceRefresh)
-        forceRefreshRef.current = false
+            try {
+                const res = await api.startChat({ tcrId, provider })
+                if (cancelled) return
+                setMessageId(res.message_id)
+                startStream(res.message_id)
+            } catch (err) {
+                if (cancelled) return
+                setStreaming(false)
+                appendLine({ type: 'error', content: err?.detail || err?.message || String(err) })
+            }
+        }
+        boot()
 
-        return () => { abortRef.current?.abort() }
-    }, [tcrId, provider, appendLine, refreshKey])
-
-    // Auto-scroll logic for both normal view and modal view
+        return () => {
+            cancelled = true
+            abortRef.current?.abort()
+            if (reconnectTimerRef.current) {
+                clearTimeout(reconnectTimerRef.current)
+                reconnectTimerRef.current = null
+            }
+        }
+    }, [tcrId, provider, presetMessageId, appendLine, startStream])
+// Auto-scroll logic for both normal view and modal view
     useEffect(() => {
         const el = logBodyRef.current
         if (el) el.scrollTop = el.scrollHeight
@@ -214,57 +304,21 @@ export default function AgentLog({ tcrId, provider, onClose, onDelete }) {
                     background: streaming ? '#4ecdc4' : done ? '#2ecc71' : '#555',
                     boxShadow: streaming ? '0 0 8px #4ecdc4' : 'none',
                 }} />
-                <span style={{ color: 'var(--text-main)', flex: 1, fontSize: 11 }}>
-                    AGENT LOG &nbsp;·&nbsp; {tcrId}
+                <span style={{ color: 'var(--text-main)', flex: 1, fontSize: 11, display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <span>AGENT LOG · {tcrId}</span>
+                    {messageId && (
+                        <Tooltip title={`Session ${messageId}`}>
+                            <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>#{messageId.slice(0, 8)}</span>
+                        </Tooltip>
+                    )}
                 </span>
                 {streaming && <Spin size="small" />}
-
-                {cachedAt && !streaming && (
-                    <Tooltip title={`Cached at ${new Date(cachedAt).toLocaleString()}`}>
-                        <span style={{
-                            fontSize: 10, color: '#2ecc71',
-                            display: 'flex', alignItems: 'center', gap: 3,
-                        }}>
-                            <CheckCircleOutlined /> cached
-                        </span>
-                    </Tooltip>
-                )}
 
                 <Button type="text" size="small" icon={<ExpandAltOutlined />}
                     onClick={() => setIsExpanded(true)}
                     style={{ color: 'var(--text-dim)' }}
                     title="Open in full modal"
                 />
-
-                <Popconfirm
-                    title="Clear cached analysis?"
-                    description="This will discard the saved result and run a fresh analysis."
-                    onConfirm={async () => {
-                        if (onDelete) {
-                            onDelete(tcrId, provider)
-                            return
-                        }
-                        setIsClearing(true)
-                        try { await api.clearChatCache(tcrId, provider) } catch { /* ignore */ }
-                        setIsClearing(false)
-                        if (onClose) {
-                            onClose()
-                        } else {
-                            forceRefreshRef.current = true
-                            setRefreshKey(k => k + 1)   // triggers useEffect re-run with force_refresh=true
-                        }
-                    }}
-                    okText="Yes, clear"
-                    cancelText="Cancel"
-                    okButtonProps={{ danger: true }}
-                >
-                    <Button type="text" size="small" icon={<DeleteOutlined />}
-                        loading={isClearing}
-                        style={{ color: 'var(--text-dim)' }}
-                        title="Clear cached analysis"
-                    />
-                </Popconfirm>
-
                 {onClose && (
                     <Button type="text" size="small" icon={<CloseOutlined />}
                         onClick={onClose}
@@ -320,9 +374,9 @@ export default function AgentLog({ tcrId, provider, onClose, onDelete }) {
                                 streaming={streaming}
                                 tcrId={tcrId}
                                 provider={provider}
-                                onJobStart={(label) => setActiveJobs(js => [...js, { id: Date.now(), label, state: 'running' }])}
-                                onJobDone={(label, result) => setActiveJobs(js => js.map(j => j.label === label ? { ...j, state: 'done', result } : j))}
-                                onJobError={(label, err) => setActiveJobs(js => js.map(j => j.label === label ? { ...j, state: 'error', error: err } : j))}
+                                onJobStart={handleJobStart}
+                                onJobDone={handleJobDone}
+                                onJobError={handleJobError}
                             />
                         )}
 
@@ -360,12 +414,14 @@ export default function AgentLog({ tcrId, provider, onClose, onDelete }) {
                 footer={null}
                 width={800}
                 centered
-                bodyStyle={{
-                    padding: 0,
-                    height: '65vh',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    background: 'var(--bg-surface)'
+                styles={{
+                    body: {
+                        padding: 0,
+                        height: '65vh',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        background: 'var(--bg-surface)'
+                    }
                 }}
             >
                 <div
@@ -416,9 +472,9 @@ export default function AgentLog({ tcrId, provider, onClose, onDelete }) {
                                     streaming={streaming}
                                     tcrId={tcrId}
                                     provider={provider}
-                                    onJobStart={(label) => setActiveJobs(js => [...js, { id: Date.now(), label, state: 'running' }])}
-                                    onJobDone={(label, result) => setActiveJobs(js => js.map(j => j.label === label && j.state === 'running' ? { ...j, state: 'done', result } : j))}
-                                    onJobError={(label, err) => setActiveJobs(js => js.map(j => j.label === label && j.state === 'running' ? { ...j, state: 'error', error: err } : j))}
+                                    onJobStart={handleJobStart}
+                                    onJobDone={handleJobDone}
+                                    onJobError={handleJobError}
                                 />
                             )}
 
@@ -495,6 +551,33 @@ function LogLine({ line }) {
         )
     }
 
+    if (line.type === 'job-result') {
+        return (
+            <div style={{
+                marginTop: 10,
+                padding: '10px 12px',
+                border: '1px solid rgba(162,155,254,0.2)',
+                borderRadius: 8,
+                background: 'rgba(162,155,254,0.06)',
+            }}>
+                <div style={{
+                    fontSize: 10,
+                    letterSpacing: '0.05em',
+                    textTransform: 'uppercase',
+                    color: 'var(--color-primary)',
+                    marginBottom: 6,
+                }}>
+                    Follow-up · {line.label}
+                </div>
+                <div style={{ fontFamily: "'Inter', sans-serif", color: 'var(--text-main)', fontSize: 12, lineHeight: 1.6 }}>
+                    <ReactMarkdown components={MARKDOWN_COMPONENTS}>
+                        {line.content}
+                    </ReactMarkdown>
+                </div>
+            </div>
+        )
+    }
+
     return null
 }
 
@@ -534,7 +617,8 @@ function SuggestionButtons({ suggestionsText, streaming, tcrId, provider, onJobS
 
     const startJob = async (suggestion, idx) => {
         setJobStates(s => ({ ...s, [idx]: 'running' }))
-        onJobStart?.(suggestion.label)
+        const jobId = `${Date.now()}-${idx}-${suggestion.type}`
+        onJobStart?.(jobId, suggestion.label)
 
         let resultText = ''
 
@@ -553,25 +637,24 @@ function SuggestionButtons({ suggestionsText, streaming, tcrId, provider, onJobS
                         try {
                             const chunk = JSON.parse(data)
                             resultText += chunk
-                            // We are actively receiving result, switch to 'done' state to show the text container
                             setJobStates(s => ({ ...s, [idx]: 'done' }))
-                            onJobDone?.(suggestion.label, resultText)
+                            onJobDone?.(jobId, suggestion.label, resultText)
                         } catch { }
                     }
                 },
                 onError: (err) => {
                     setJobStates(s => ({ ...s, [idx]: 'error' }))
-                    onJobError?.(suggestion.label, err.message || String(err))
+                    onJobError?.(jobId, suggestion.label, err.message || String(err))
                 },
                 onClose: () => {
                     setJobStates(s => ({ ...s, [idx]: 'done' }))
-                    onJobDone?.(suggestion.label, resultText)
+                    onJobDone?.(jobId, suggestion.label, resultText)
                     onJobFullComplete?.()
                 }
             })
         } catch (e) {
             setJobStates(s => ({ ...s, [idx]: 'error' }))
-            onJobError?.(suggestion.label, String(e))
+            onJobError?.(jobId, suggestion.label, String(e))
         }
     }
 

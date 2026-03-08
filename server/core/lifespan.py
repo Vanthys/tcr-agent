@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from core.config import settings
-from data.db import close_conn, init_chat_cache_table
+from data.db import close_conn, init_chat_cache_table, init_chat_messages_table
 from data.loaders import (
     augment_tcr_db_from_parquet,
     load_embeddings,
@@ -69,6 +69,7 @@ async def lifespan(app: FastAPI):
 
     # ── Ensure chat cache table exists ────────────────────────────────────
     init_chat_cache_table()
+    init_chat_messages_table()
 
     yield  # ── App is running ──
 

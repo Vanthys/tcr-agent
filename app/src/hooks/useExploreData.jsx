@@ -117,15 +117,11 @@ export function useExploreData() {
     const triggerUmapRecompute = async () => {
         try {
             setWorkerLoading(true)
-            const res = await fetch('http://localhost:3001/api/worker/umap/compute', { method: 'POST' })
-            if (res.ok) {
-                message.success('UMAP Recomputation Queued! View backend logs for progress.')
-            } else {
-                message.error('Failed to start worker')
-            }
+            await api.triggerUmapRecompute()
+            message.success('UMAP recomputation queued! View backend logs for progress.')
         } catch (e) {
             console.error(e)
-            message.error('Error starting worker')
+            message.error('Failed to start worker')
         } finally {
             setTimeout(() => setWorkerLoading(false), 2000)
         }

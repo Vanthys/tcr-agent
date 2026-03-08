@@ -8,7 +8,7 @@ import {
     ClockCircleOutlined, HistoryOutlined, ReloadOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
-import { api, streamAnnotate } from '../api'
+import { api } from '../api'
 import AgentLog from '../components/AgentLog'
 
 const { Header, Content } = Layout
@@ -25,18 +25,13 @@ function formatDate(iso) {
     } catch { return iso }
 }
 
-function formatSize(bytes) {
-    if (bytes < 1024) return `${bytes} B`
-    return `${(bytes / 1024).toFixed(1)} KB`
-}
-
 export default function PastChatsPage() {
     const navigate = useNavigate()
     const [chats, setChats] = useState([])
     const [loading, setLoading] = useState(true)
     const [search, setSearch] = useState('')
-    const [selected, setSelected] = useState(null) // { tcrId, provider }
-    const [clearing, setClearing] = useState(null) // tcrId+provider being cleared
+    const [selected, setSelected] = useState(null) // chat record
+    const [clearing, setClearing] = useState(null) // messageId being cleared
 
     const loadChats = useCallback(() => {
         setLoading(true)
@@ -48,19 +43,20 @@ export default function PastChatsPage() {
 
     useEffect(() => { loadChats() }, [loadChats])
 
-    const clearOne = async (tcrId, provider) => {
-        setClearing(`${tcrId}-${provider}`)
-        if (selected?.tcrId === tcrId && selected?.provider === provider) {
+    const clearOne = async (messageId) => {
+        setClearing(messageId)
+        if (selected?.message_id === messageId) {
             setSelected(null)
         }
-        try { await api.clearChatCache(tcrId, provider) } catch { /* ignore */ }
+        try { await api.deleteChat(messageId) } catch { /* ignore */ }
         setClearing(null)
         loadChats()
     }
 
     const filtered = chats.filter(c =>
         c.tcr_id.toLowerCase().includes(search.toLowerCase()) ||
-        c.provider.toLowerCase().includes(search.toLowerCase())
+        c.provider.toLowerCase().includes(search.toLowerCase()) ||
+        c.message_id.toLowerCase().includes(search.toLowerCase())
     )
 
     return (
@@ -137,13 +133,13 @@ export default function PastChatsPage() {
                         </div>
                     )}
                     {filtered.map(chat => {
-                        const key = `${chat.tcr_id}-${chat.provider}`
-                        const isActive = selected?.tcrId === chat.tcr_id && selected?.provider === chat.provider
-                        const isLoadingClear = clearing === key
+                        const key = chat.message_id
+                        const isActive = selected?.message_id === chat.message_id
+                        const isLoadingClear = clearing === chat.message_id
                         return (
                             <div
                                 key={key}
-                                onClick={() => setSelected({ tcrId: chat.tcr_id, provider: chat.provider })}
+                                onClick={() => setSelected(chat)}
                                 style={{
                                     padding: '12px 14px',
                                     borderBottom: '1px solid var(--border)',
@@ -169,8 +165,8 @@ export default function PastChatsPage() {
                                     </span>
 
                                     <Popconfirm
-                                        title="Delete this cached analysis?"
-                                        onConfirm={e => { e?.stopPropagation(); clearOne(chat.tcr_id, chat.provider) }}
+                                        title="Delete this chat session?"
+                                        onConfirm={e => { e?.stopPropagation(); clearOne(chat.message_id) }}
                                         onCancel={e => e?.stopPropagation()}
                                         okText="Delete"
                                         cancelText="Cancel"
@@ -197,9 +193,11 @@ export default function PastChatsPage() {
                                         <RobotOutlined style={{ marginRight: 3 }} />
                                         {PROVIDER_LABELS[chat.provider] ?? chat.provider}
                                     </Tag>
-                                    <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>
-                                        {formatSize(chat.payload_size)}
-                                    </span>
+                                    <Tooltip title={`Session ${chat.message_id}`}>
+                                        <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>
+                                            #{chat.message_id.slice(0, 8)}
+                                        </span>
+                                    </Tooltip>
                                 </div>
 
                                 <div style={{
@@ -207,7 +205,7 @@ export default function PastChatsPage() {
                                     display: 'flex', alignItems: 'center', gap: 4,
                                 }}>
                                     <ClockCircleOutlined />
-                                    {formatDate(chat.cached_at)}
+                                    {formatDate(chat.updated_at)}
                                 </div>
                             </div>
                         )
@@ -231,14 +229,14 @@ export default function PastChatsPage() {
                         <div style={{ flex: 1, overflow: 'hidden', padding: '16px 20px' }}>
                             <div style={{ marginBottom: 12, fontSize: 11, color: 'var(--text-dim)', fontFamily: "'JetBrains Mono', monospace" }}>
                                 <RobotOutlined style={{ marginRight: 6 }} />
-                                {selected.tcrId} · {PROVIDER_LABELS[selected.provider] ?? selected.provider}
+                                {selected.tcr_id} · {PROVIDER_LABELS[selected.provider] ?? selected.provider}
                             </div>
                             <div style={{ height: 'calc(100% - 36px)' }}>
                                 <AgentLog
-                                    key={`${selected.tcrId}-${selected.provider}`}
-                                    tcrId={selected.tcrId}
+                                    key={selected.message_id}
+                                    tcrId={selected.tcr_id}
                                     provider={selected.provider}
-                                    onDelete={clearOne}
+                                    messageId={selected.message_id}
                                 />
                             </div>
                         </div>
