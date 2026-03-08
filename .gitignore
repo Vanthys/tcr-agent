@@ -1,3 +1,8 @@
 legacy
-data
+data/embeddings
+data/hero
+data/predictions
+data/predictions_mock
+data/processed
+
 handover
