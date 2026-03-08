@@ -208,11 +208,22 @@ export default function UmapCanvas({ points, ingestedPoints = [], selectedId, fi
     const selectedStroke = isDark ? [255, 255, 255] : [15, 23, 42]
     const lassoStroke = isDark ? [64, 224, 192] : [6, 95, 70]
 
+    const handlePointHover = useCallback((info) => {
+        if (info?.object) setHoverInfo(info)
+        else setHoverInfo(null)
+    }, [])
+
+    const handlePointClick = useCallback((info) => {
+        if (info?.object && onSelect) {
+            onSelect(info.object)
+        }
+    }, [onSelect])
+
     const layers = [
         new ScatterplotLayer({
             id: 'scatterplot-layer',
             data: scatterData,
-            pickable: true,
+            pickable: false,
             opacity: 0.8,
             stroked: true,
             filled: true,
@@ -234,7 +245,7 @@ export default function UmapCanvas({ points, ingestedPoints = [], selectedId, fi
                 return d.color
             },
             getLineColor: d => d.isSelected ? selectedStroke : d.isLassoed ? lassoStroke : d.color,
-            getRadius: d => d.isSelected ? 7 : d.isLassoed ? 4.2 : 2,
+            getRadius: d => d.isSelected ? 7.5 : d.isLassoed ? 4.6 : 2.6,
             getLineWidth: d => d.isSelected ? 2.4 : d.isLassoed ? 2 : 0,
             updateTriggers: {
                 getFillColor: [isDark, lassoSet],
@@ -242,12 +253,26 @@ export default function UmapCanvas({ points, ingestedPoints = [], selectedId, fi
                 getRadius: [selectedId, lassoSet],
                 getLineWidth: [selectedId, lassoSet]
             },
-            onHover: info => setHoverInfo(info),
-            onClick: info => {
-                if (info.object && onSelect) {
-                    onSelect(info.object);
-                }
-            }
+        }),
+        new ScatterplotLayer({
+            id: 'scatterplot-hit-targets',
+            data: scatterData,
+            pickable: true,
+            opacity: 0,
+            stroked: false,
+            filled: true,
+            radiusUnits: 'pixels',
+            lineWidthUnits: 'pixels',
+            parameters: { depthTest: false },
+            getPosition: d => d.position,
+            getRadius: d => d.isSelected ? 11 : d.isLassoed ? 8 : 6,
+            getFillColor: [0, 0, 0, 0],
+            getLineColor: [0, 0, 0, 0],
+            updateTriggers: {
+                getRadius: [selectedId, lassoSet],
+            },
+            onHover: handlePointHover,
+            onClick: handlePointClick,
         }),
         // Dark halo behind ingested points for visibility
         ingestedData.length > 0 && new ScatterplotLayer({
