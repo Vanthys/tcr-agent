@@ -83,13 +83,14 @@ export default function ExploreTopNav({
                 </div>
             </div>
 
-            {/* Point count */}
+            {/* Point count 
             <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
                 {loading
                     ? <><Spin size="small" style={{ marginRight: 8 }} />Loading {pointCount.toLocaleString()} TCRs...</>
                     : <>{pointCount.toLocaleString()} TCRs</>
                 }
             </div>
+            */}
 
             {/* Search bar */}
             <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
@@ -171,7 +172,7 @@ export default function ExploreTopNav({
                 </Tooltip>
             </Popconfirm>
 
-            {/* Backend status */}
+            {/* Backend status 
             <Tooltip title={backendOk == null ? 'Checking backend…' : backendOk ? 'Backend connected' : 'Backend offline — running in static mode'}>
                 <Badge
                     status={backendOk == null ? 'processing' : backendOk ? 'success' : 'warning'}
@@ -182,6 +183,7 @@ export default function ExploreTopNav({
                     }
                 />
             </Tooltip>
+            */}
         </Header>
     )
 }

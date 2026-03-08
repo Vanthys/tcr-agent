@@ -2,7 +2,7 @@
 main.py — TCR Agent FastAPI application factory.
 
 Start with:
-    uv run uvicorn main:app --reload --port 8000
+    uv run uvicorn main:app --reload --port 3001
 """
 
 import logging
