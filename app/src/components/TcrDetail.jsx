@@ -5,7 +5,7 @@
  * neighbor list, and triggers the agent log.
  */
 import { useState, useEffect } from 'react'
-import { Button, Divider, Progress, Tag, Skeleton, Tooltip } from 'antd'
+import { Button, Divider, Tag, Skeleton, Tooltip, Tabs } from 'antd'
 import { RobotOutlined, ReloadOutlined } from '@ant-design/icons'
 import { api } from '../api'
 import AgentLog from './AgentLog'
@@ -34,7 +34,8 @@ const SOURCE_LABELS = {
 
 export default function TcrDetail({ point, provider, onClose }) {
     const [detail, setDetail] = useState(null)
-    const [mutagenesis, setMutagenesis] = useState(null)
+    const [mutagenesisEntries, setMutagenesisEntries] = useState([])
+    const [mutagenesisActiveEpitope, setMutagenesisActiveEpitope] = useState(null)
     const [loadingDetail, setLoadingDetail] = useState(false)
     const [loadingMutagenesis, setLoadingMutagenesis] = useState(false)
     const [showAgent, setShowAgent] = useState(false)
@@ -45,7 +46,8 @@ export default function TcrDetail({ point, provider, onClose }) {
     useEffect(() => {
         if (!tcrId) return
         setDetail(null)
-        setMutagenesis(null)
+        setMutagenesisEntries([])
+        setMutagenesisActiveEpitope(null)
         setShowAgent(false)
 
         // Fetch TCR detail
@@ -58,8 +60,10 @@ export default function TcrDetail({ point, provider, onClose }) {
         // Fetch mutagenesis (404 is fine)
         setLoadingMutagenesis(true)
         api.mutagenesis(tcrId)
-            .then(setMutagenesis)
-            .catch(() => setMutagenesis(null))
+            .then((payload) => {
+                setMutagenesisEntries(normaliseMutagenesisResponse(payload))
+            })
+            .catch(() => setMutagenesisEntries([]))
             .finally(() => setLoadingMutagenesis(false))
 
         // Auto-show AgentLog if a cached session exists
@@ -77,6 +81,44 @@ export default function TcrDetail({ point, provider, onClose }) {
 
     const predictions = detail?.predictions ?? []
     const neighbors = detail?.nearest_neighbors ?? []
+    const preferredEpitope = epitope ?? predictions[0]?.epitope_name ?? null
+
+    useEffect(() => {
+        if (!mutagenesisEntries.length) {
+            if (mutagenesisActiveEpitope !== null) setMutagenesisActiveEpitope(null)
+            return
+        }
+        const hasActive = mutagenesisEntries.some(entry => entry.epitope === mutagenesisActiveEpitope)
+        if (hasActive) return
+        const candidate = preferredEpitope
+            ? mutagenesisEntries.find(entry => entry.epitope === preferredEpitope)
+            : null
+        const fallback = candidate ?? mutagenesisEntries[0]
+        if (fallback?.epitope) {
+            setMutagenesisActiveEpitope(fallback.epitope)
+        }
+    }, [mutagenesisEntries, preferredEpitope, mutagenesisActiveEpitope])
+
+    const hasMultipleMutagenesis = mutagenesisEntries.length > 1
+    const mutActiveKey = mutagenesisActiveEpitope ?? mutagenesisEntries[0]?.epitope ?? null
+    const mutagenesisTabItems = hasMultipleMutagenesis
+        ? mutagenesisEntries.map(entry => ({
+            key: entry.epitope,
+            label: (
+                <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.1 }}>
+                    <span style={{ fontSize: 11, fontWeight: 600 }}>{entry.epitope}</span>
+                    {typeof entry.wild_type_score === 'number' && (
+                        <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>
+                            WT {entry.wild_type_score.toFixed(3)}
+                        </span>
+                    )}
+                </div>
+            ),
+            children: <MutationHeatmap data={entry} loading={loadingMutagenesis} />,
+        }))
+        : []
+    const resolvedMutActiveKey = mutActiveKey || mutagenesisEntries[0]?.epitope || undefined
+    const singleMutagenesisEntry = !hasMultipleMutagenesis ? (mutagenesisEntries[0] ?? null) : null
 
     // Normalise prediction scores for bar widths
     const scores = predictions.map(p => p.interaction_score ?? 0)
@@ -206,7 +248,17 @@ export default function TcrDetail({ point, provider, onClose }) {
             {/* ── Mutation heatmap ── */}
             <div>
                 <SectionLabel>Mutation Landscape</SectionLabel>
-                <MutationHeatmap data={mutagenesis} loading={loadingMutagenesis} />
+                {hasMultipleMutagenesis ? (
+                    <Tabs
+                        size="smalls"
+                        destroyInactiveTabPane
+                        activeKey={resolvedMutActiveKey}
+                        onChange={setMutagenesisActiveEpitope}
+                        items={mutagenesisTabItems}
+                    />
+                ) : (
+                    <MutationHeatmap data={singleMutagenesisEntry} loading={loadingMutagenesis} />
+                )}
             </div>
 
             {detail?.has_boltz2 && (
@@ -266,4 +318,15 @@ function SectionLabel({ children }) {
             marginBottom: 8,
         }}>{children}</div>
     )
+}
+
+function normaliseMutagenesisResponse(payload) {
+    if (!payload) return []
+    if (Array.isArray(payload)) return payload
+    if (Array.isArray(payload.entries)) return payload.entries
+    if (payload.entries && typeof payload.entries === 'object') {
+        return Object.values(payload.entries)
+    }
+    if (payload.landscape) return [payload]
+    return []
 }

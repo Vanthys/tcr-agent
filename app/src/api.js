@@ -60,7 +60,7 @@ export const api = {
         })
     },
     tcr: (id) => get(`/api/tcr/${encodeURIComponent(id)}`),
-    mutagenesis: (id) => get(`/api/mutagenesis/${encodeURIComponent(id)}`),
+    mutagenesis: (id, params = {}) => get(`/api/mutagenesis/${encodeURIComponent(id)}`, params),
     epitopeDistribution: () => get('/api/epitope_distribution'),
     statsSummary: () => get('/api/stats_summary'),
     categorySummary: () => get('/api/category_summary'),

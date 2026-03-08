@@ -317,10 +317,17 @@ def _format_mutagenesis(m: dict) -> str:
         "Top predicted variants (Δ = score change vs wild-type):",
     ]
     for v in m.get("top_variants", [])[:5]:
+        score = v.get("predicted_score", 0)
         lines.append(
-            f"  {v.get('mutations')} → score {v.get('predicted_score'):.4f}"
+            f"  {v.get('mutations')} → score {score:.4f}"
             f" (Δ{v.get('delta', 0):+.4f}) — {v.get('note', 'hypothesis')}"
         )
+    others = [ep for ep in m.get("epitope_options", []) if ep and ep != m.get("epitope")]
+    if others:
+        joined = ", ".join(others[:5])
+        if len(others) > 5:
+            joined += ", …"
+        lines.append(f"Other cached epitopes: {joined}")
     return "\n".join(lines)
 
 

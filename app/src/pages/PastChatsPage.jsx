@@ -50,12 +50,12 @@ export default function PastChatsPage() {
 
     const clearOne = async (tcrId, provider) => {
         setClearing(`${tcrId}-${provider}`)
-        try { await api.clearChatCache(tcrId, provider) } catch { /* ignore */ }
-        setClearing(null)
-        loadChats()
         if (selected?.tcrId === tcrId && selected?.provider === provider) {
             setSelected(null)
         }
+        try { await api.clearChatCache(tcrId, provider) } catch { /* ignore */ }
+        setClearing(null)
+        loadChats()
     }
 
     const filtered = chats.filter(c =>
@@ -238,6 +238,7 @@ export default function PastChatsPage() {
                                     key={`${selected.tcrId}-${selected.provider}`}
                                     tcrId={selected.tcrId}
                                     provider={selected.provider}
+                                    onDelete={clearOne}
                                 />
                             </div>
                         </div>

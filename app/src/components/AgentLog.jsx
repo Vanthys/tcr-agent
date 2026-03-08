@@ -54,7 +54,7 @@ const MODAL_MARKDOWN_COMPONENTS = {
     li: ({ node, ...props }) => <li style={{ margin: '4px 0' }} {...props} />,
 }
 
-export default function AgentLog({ tcrId, provider, onClose }) {
+export default function AgentLog({ tcrId, provider, onClose, onDelete }) {
     const [lines, setLines] = useState([])
     const [streaming, setStreaming] = useState(false)
     const [claudeText, setClaudeText] = useState('')
@@ -240,11 +240,19 @@ export default function AgentLog({ tcrId, provider, onClose }) {
                     title="Clear cached analysis?"
                     description="This will discard the saved result and run a fresh analysis."
                     onConfirm={async () => {
+                        if (onDelete) {
+                            onDelete(tcrId, provider)
+                            return
+                        }
                         setIsClearing(true)
                         try { await api.clearChatCache(tcrId, provider) } catch { /* ignore */ }
-                        forceRefreshRef.current = true
                         setIsClearing(false)
-                        setRefreshKey(k => k + 1)   // triggers useEffect re-run with force_refresh=true
+                        if (onClose) {
+                            onClose()
+                        } else {
+                            forceRefreshRef.current = true
+                            setRefreshKey(k => k + 1)   // triggers useEffect re-run with force_refresh=true
+                        }
                     }}
                     okText="Yes, clear"
                     cancelText="Cancel"

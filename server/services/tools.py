@@ -59,6 +59,10 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
                     "tcr_id": {
                         "type": "string",
                         "description": "The target TCR ID to get the mutation landscape for."
+                    },
+                    "epitope": {
+                        "type": "string",
+                        "description": "Optional epitope identifier for multi-target landscapes."
                     }
                 },
                 "required": ["tcr_id"]
@@ -92,20 +96,47 @@ class ToolExecutor:
             "top_predictions": predictions[:3]  # strictly limit to 3 to save context window
         }
 
-    def get_mutagenesis(self, tcr_id: str, limit: int = 3, compute_if_missing: bool = False) -> Dict[str, Any]:
+    def get_mutagenesis(
+        self,
+        tcr_id: str,
+        epitope: str | None = None,
+        limit: int = 3,
+        compute_if_missing: bool = False,
+    ) -> Dict[str, Any]:
         """Execute the mutagenesis lookup. If not cached, simulate computation."""
-        mutagenesis = self.store.mutagenesis_cache.get(tcr_id)
-        if not mutagenesis:
+        entries = self.store.mutagenesis_cache.get(tcr_id)
+        selection = None
+
+        if entries:
+            if epitope and epitope in entries:
+                selection = entries[epitope]
+            elif len(entries) == 1:
+                selection = next(iter(entries.values()))
+            else:
+                known = self._lookup_known_epitope(tcr_id)
+                if known and known in entries:
+                    selection = entries[known]
+                else:
+                    selection = max(
+                        entries.values(),
+                        key=lambda item: item.get("wild_type_score", float("-inf")),
+                        default=None,
+                    )
+
+        if selection is None:
             if compute_if_missing:
-                mutagenesis = self._compute_mock_mutagenesis(tcr_id)
-            if not mutagenesis:
+                selection = self._compute_mock_mutagenesis(tcr_id)
+            if selection is None:
                 return {"available": False, "reason": "No pre-computed mutation landscape exists for this TCR."}
-        
+
+        epitope_options = sorted(self.store.mutagenesis_cache.get(tcr_id, {}).keys())
         return {
             "available": True,
-            "epitope": mutagenesis.get("epitope"),
-            "wild_type_score": mutagenesis.get("wild_type_score"),
-            "top_variants": mutagenesis.get("top_variants", [])[:limit] # limit to save context
+            "epitope": selection.get("epitope"),
+            "wild_type_score": selection.get("wild_type_score"),
+            "cdr3b": selection.get("cdr3b"),
+            "top_variants": selection.get("top_variants", [])[:limit],  # limit to save context
+            "epitope_options": epitope_options,
         }
 
     def _compute_mock_mutagenesis(self, tcr_id: str) -> Dict[str, Any]:
@@ -167,8 +198,22 @@ class ToolExecutor:
         }
         
         # Save to cache so the scatterplot UI can read it!
-        self.store.mutagenesis_cache[tcr_id] = mut_data
+        bucket = self.store.mutagenesis_cache.setdefault(tcr_id, {})
+        bucket[epitope] = mut_data
         return mut_data
+
+    def _lookup_known_epitope(self, tcr_id: str) -> str | None:
+        """Best-effort helper to map a TCR to its known epitope in the DB."""
+        db = self.store.tcr_db
+        if db.empty:
+            return None
+        row = db[db["tcr_id"] == tcr_id]
+        if row.empty:
+            return None
+        known = row.iloc[0].get("known_epitope")
+        if isinstance(known, str) and known.strip():
+            return known
+        return None
 
     def execute(self, tool_name: str, tool_args: Dict[str, Any]) -> Dict[str, Any]:
         """Route the tool call to the correct method."""

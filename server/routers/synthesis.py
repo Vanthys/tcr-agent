@@ -76,10 +76,17 @@ def synthesis_export(
 
         # Mutagenesis variants from DecoderTCR landscape
         if request.include_variants:
-            mutag_key = f"{tid}_{request.epitope}"
-            # Also try just {tid} in case loaders parsed files named {tcr_id}.json
-            mutag = store.mutagenesis_cache.get(mutag_key) or store.mutagenesis_cache.get(tid)
-            
+            mut_bucket = store.mutagenesis_cache.get(tid)
+            mutag = None
+            if isinstance(mut_bucket, dict):
+                # Legacy caches stored the landscape directly rather than per epitope
+                if 'landscape' in mut_bucket:
+                    mutag = mut_bucket
+                else:
+                    mutag = mut_bucket.get(request.epitope)
+                    if mutag is None and mut_bucket:
+                        mutag = next(iter(mut_bucket.values()))
+
             if mutag:
                 def _apply_mutation(cdr3, mut_str):
                     if len(mut_str) < 3:
