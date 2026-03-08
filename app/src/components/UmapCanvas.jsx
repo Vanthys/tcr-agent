@@ -58,6 +58,7 @@ export default function UmapCanvas({ points, selectedId, filters, hiddenCategori
     const [hoverInfo, setHoverInfo] = useState(null);
     const [lassoPolygon, setLassoPolygon] = useState([]);
     const containerRef = useRef(null);
+    const prevDimsRef = useRef({ x: xDim, y: yDim });
     const revealCount = isRevealing ? 0 : points?.length; // Simplified for now
 
     const lassoSet = useMemo(() => {
@@ -90,31 +91,37 @@ export default function UmapCanvas({ points, selectedId, filters, hiddenCategori
         });
     }, [points, isDark, lassoSet, selectedId, filterSource, filterCat, hiddenCatSet, xDim, yDim]);
 
-    // Initial ViewState Auto-fit
+    // Initial ViewState Auto-fit — percentile clipping (p2/p98) to ignore outliers
     React.useEffect(() => {
         if (points?.length > 0 && containerRef.current && viewState.zoom === 4 && viewState.target[0] === 0) {
-            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
-            for (const p of scatterData) {
-                if (p.position[0] < minX) minX = p.position[0];
-                if (p.position[0] > maxX) maxX = p.position[0];
-                if (p.position[1] < minY) minY = p.position[1];
-                if (p.position[1] > maxY) maxY = p.position[1];
+            const n = scatterData.length
+            if (n === 0) return
+            const xs = new Float32Array(n)
+            const ys = new Float32Array(n)
+            for (let i = 0; i < n; i++) {
+                xs[i] = scatterData[i].position[0]
+                ys[i] = scatterData[i].position[1]
             }
-            if (minX !== Infinity) {
-                const { width, height } = containerRef.current.getBoundingClientRect();
-                const scaleX = width / ((maxX - minX) || 1);
-                const scaleY = height / ((maxY - minY) || 1);
-                const zoom = Math.log2(Math.min(scaleX, scaleY)) - 0.5; // less margin
-                setViewState(prev => ({
-                    ...prev,
-                    target: [(minX + maxX) / 2, (minY + maxY) / 2, 0],
-                    zoom: isNaN(zoom) ? 4 : zoom
-                }));
-            }
+            xs.sort()
+            ys.sort()
+            const lo = Math.floor(n * 0.02)
+            const hi = Math.min(Math.ceil(n * 0.98), n - 1)
+            const minX = xs[lo], maxX = xs[hi]
+            const minY = ys[lo], maxY = ys[hi]
+
+            const { width, height } = containerRef.current.getBoundingClientRect();
+            const scaleX = width / ((maxX - minX) || 1);
+            const scaleY = height / ((maxY - minY) || 1);
+            const zoom = Math.log2(Math.min(scaleX, scaleY)) - 0.5;
+            setViewState(prev => ({
+                ...prev,
+                target: [(minX + maxX) / 2, (minY + maxY) / 2, 0],
+                zoom: isNaN(zoom) ? 4 : zoom
+            }));
         }
     }, [points?.length, viewState.zoom, viewState.target, scatterData]);
 
-    // Zoom to selected point when it changes or dimensions change
+    // Zoom to selected point when selection changes
     React.useEffect(() => {
         if (selectedId && scatterData) {
             const point = scatterData.find(p => (p.id ?? p.tcr_id) === selectedId);
@@ -122,14 +129,71 @@ export default function UmapCanvas({ points, selectedId, filters, hiddenCategori
                 setViewState(prev => ({
                     ...prev,
                     target: [point.position[0], point.position[1], 0],
-                    zoom: 12, // zoom in close
+                    zoom: 12,
                     transitionDuration: 1000,
                     transitionEasing: easeCubicInOut,
                     transitionInterpolator: new LinearInterpolator(['target', 'zoom'])
                 }));
             }
         }
-    }, [selectedId, xDim, yDim]);
+    }, [selectedId]);
+
+    // Re-fit viewport when UMAP dimensions change
+    React.useEffect(() => {
+        if (prevDimsRef.current.x === xDim && prevDimsRef.current.y === yDim) return
+        prevDimsRef.current = { x: xDim, y: yDim }
+        if (!containerRef.current || scatterData.length === 0) return
+
+        const { width, height } = containerRef.current.getBoundingClientRect()
+        const transition = { transitionDuration: 600, transitionEasing: easeCubicInOut, transitionInterpolator: new LinearInterpolator(['target', 'zoom']) }
+
+        // Case 1: lasso selection → fit to selected points
+        if (lassoSelected.length > 0) {
+            const ids = new Set(lassoSelected.map(p => p.id ?? p.tcr_id))
+            const pts = scatterData.filter(p => ids.has(p.id ?? p.tcr_id))
+            if (pts.length === 0) return
+            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+            for (const p of pts) {
+                if (p.position[0] < minX) minX = p.position[0]
+                if (p.position[0] > maxX) maxX = p.position[0]
+                if (p.position[1] < minY) minY = p.position[1]
+                if (p.position[1] > maxY) maxY = p.position[1]
+            }
+            const pad = 0.1 * Math.max(maxX - minX, maxY - minY, 0.01)
+            const scaleX = width / ((maxX - minX + pad * 2) || 1)
+            const scaleY = height / ((maxY - minY + pad * 2) || 1)
+            const zoom = Math.log2(Math.min(scaleX, scaleY))
+            setViewState(prev => ({ ...prev, target: [(minX + maxX) / 2, (minY + maxY) / 2, 0], zoom: isNaN(zoom) ? 4 : zoom, ...transition }))
+            return
+        }
+
+        // Case 2: single selected point → zoom to it
+        if (selectedId) {
+            const point = scatterData.find(p => (p.id ?? p.tcr_id) === selectedId)
+            if (point?.position) {
+                setViewState(prev => ({ ...prev, target: [point.position[0], point.position[1], 0], zoom: 12, ...transition }))
+            }
+            return
+        }
+
+        // Case 3: no selection → percentile re-fit
+        const n = scatterData.length
+        const xs = new Float32Array(n)
+        const ys = new Float32Array(n)
+        for (let i = 0; i < n; i++) {
+            xs[i] = scatterData[i].position[0]
+            ys[i] = scatterData[i].position[1]
+        }
+        xs.sort()
+        ys.sort()
+        const lo = Math.floor(n * 0.02)
+        const hi = Math.min(Math.ceil(n * 0.98), n - 1)
+        const minX = xs[lo], maxX = xs[hi], minY = ys[lo], maxY = ys[hi]
+        const scaleX = width / ((maxX - minX) || 1)
+        const scaleY = height / ((maxY - minY) || 1)
+        const zoom = Math.log2(Math.min(scaleX, scaleY)) - 0.5
+        setViewState(prev => ({ ...prev, target: [(minX + maxX) / 2, (minY + maxY) / 2, 0], zoom: isNaN(zoom) ? 4 : zoom, ...transition }))
+    }, [xDim, yDim, scatterData, selectedId, lassoSelected]);
 
     const layers = [
         new ScatterplotLayer({
