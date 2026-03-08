@@ -8,7 +8,7 @@ import SidebarPanels from './SidebarPanels'
 
 const { Sider } = Layout
 
-export default function AppSidebar({ stats, provider, onProviderChange, categoryCounts, hiddenCategories, onToggleCategory, onResetCategories }) {
+export default function AppSidebar({ stats, provider, onProviderChange, categoryCounts, hiddenCategories, onToggleCategory, onResetCategories, ingestedPoints = [], onClearIngested }) {
     return (
         <Sider
             width={220}
@@ -32,6 +32,44 @@ export default function AppSidebar({ stats, provider, onProviderChange, category
                     onResetCategories={onResetCategories}
                 />
             </div>
+
+            {/* Recent upload indicator */}
+            {ingestedPoints.length > 0 && (
+                <div style={{
+                    padding: '10px 14px',
+                    borderTop: '1px solid var(--border)',
+                    background: 'var(--bg-surface)',
+                    flexShrink: 0,
+                }}>
+                    <div style={{
+                        fontSize: 10, color: 'var(--text-dim)', marginBottom: 6,
+                        fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em',
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    }}>
+                        <span>Recent Upload</span>
+                        <span
+                            onClick={onClearIngested}
+                            style={{ cursor: 'pointer', color: 'var(--color-primary)', fontSize: 9, textTransform: 'none', fontWeight: 400 }}
+                        >clear</span>
+                    </div>
+                    <div style={{
+                        display: 'flex', alignItems: 'center', gap: 8, fontSize: 12,
+                    }}>
+                        <span style={{
+                            width: 10, height: 10, borderRadius: '50%',
+                            background: '#FFB900', border: '2px solid #fff',
+                            display: 'inline-block', flexShrink: 0,
+                            boxShadow: '0 0 4px rgba(255,185,0,0.6)',
+                        }} />
+                        <span style={{ color: 'var(--text-main)' }}>
+                            <strong>{ingestedPoints.length}</strong> TCRs
+                        </span>
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 4, lineHeight: 1.3 }}>
+                        Shown as gold dots on UMAP
+                    </div>
+                </div>
+            )}
 
             {/* AI Provider selector */}
             <div style={{

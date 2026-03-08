@@ -39,6 +39,7 @@ class AsyncTask:
 
 # Global state
 _tasks: Dict[str, AsyncTask] = {}
+_background: set = set()  # prevent GC of background asyncio tasks
 
 def get_task(task_id: str) -> Optional[AsyncTask]:
     return _tasks.get(task_id)
@@ -96,7 +97,7 @@ async def _run_umap_recompute(task_id: str):
         logger.error("UMAP Recompute error: %s", exc)
         update_task_state(task_id, TaskState.FAILED, error=str(exc))
 
-async def _run_umap_transform(task_id: str, new_embeddings, new_metadata):
+async def _run_umap_transform(task_id: str, new_embeddings, new_metadata, progress_start: float = 0.1):
     # Iterative addition of new TCR embeddings
     import joblib
     import numpy as np
@@ -105,7 +106,7 @@ async def _run_umap_transform(task_id: str, new_embeddings, new_metadata):
     from data.store import get_store
     from core.config import settings
 
-    update_task_state(task_id, TaskState.RUNNING, progress=0.1)
+    update_task_state(task_id, TaskState.RUNNING, progress=progress_start)
     try:
         embed_dir = settings.embed_dir
         
@@ -132,73 +133,71 @@ async def _run_umap_transform(task_id: str, new_embeddings, new_metadata):
             
         loop = asyncio.get_running_loop()
         emb_array, coords_nd = await loop.run_in_executor(None, _do_transform)
-        update_task_state(task_id, TaskState.RUNNING, progress=0.7)
+        update_task_state(task_id, TaskState.RUNNING, progress=max(progress_start + 0.1, 0.7))
         
-        # Write to a NEW version
-        new_ts = int(time.time())
-        new_umap_csv = embed_dir / f"umap_coords_v{new_ts}.csv"
-        
+        # Store ingested points in memory only (ephemeral — not persisted to disk)
+        # NaN values from UMAP transform must be replaced with 0.0 for JSON serialization
+        import math
+        def _safe_float(v):
+            f = float(v)
+            return 0.0 if math.isnan(f) or math.isinf(f) else f
+
         n_points = len(emb_array)
-        df_new = pd.DataFrame({
-            'tcr_id': new_metadata.get('tcr_ids', [f"new_tcr_{i}" for i in range(n_points)]),
-            'source': new_metadata.get('sources', ['lab'] * n_points),
-            'CDR3b': new_metadata.get('cdr3b', [''] * n_points),
-            'known_epitope': new_metadata.get('known_epitopes', [None] * n_points),
-            'antigen_category': new_metadata.get('antigen_categories', ['unknown'] * n_points),
-            'd1': coords_nd[:, 0],
-            'd2': coords_nd[:, 1],
-            'd3': coords_nd[:, 2],
-            'd4': coords_nd[:, 3],
-            'd5': coords_nd[:, 4],
-        })
-        
-        df_combined = pd.concat([df_old, df_new], ignore_index=True)
-        df_combined.to_csv(new_umap_csv, index=False)
-        
-        # We also need to copy the model over to the new version name so it stays synced
-        import shutil
-        new_model_path = embed_dir / f"umap_model_v{new_ts}.joblib"
-        shutil.copy2(model_path, new_model_path)
-        
-        # Update pointer
-        pointer_path.write_text(str(new_ts))
-        
-        # update DB via loader
-        update_task_state(task_id, TaskState.RUNNING, progress=0.9)
         store = get_store()
-        store.umap_df = load_umap(new_umap_csv, hero_dir=settings.hero_dir)
-        
-        update_task_state(task_id, TaskState.COMPLETED, progress=1.0, result=f"Added {n_points} new TCRs into 5D projection.")
+        store.ingested_points = []
+        for i in range(n_points):
+            store.ingested_points.append({
+                'id': new_metadata.get('tcr_ids', [f"new_tcr_{i}" for _ in range(n_points)])[i],
+                'd1': _safe_float(coords_nd[i, 0]),
+                'd2': _safe_float(coords_nd[i, 1]),
+                'd3': _safe_float(coords_nd[i, 2]),
+                'd4': _safe_float(coords_nd[i, 3]),
+                'd5': _safe_float(coords_nd[i, 4]),
+                'c': new_metadata.get('cdr3b', [''])[i],
+                's': new_metadata.get('sources', ['user_upload'])[i],
+                'e': new_metadata.get('known_epitopes', [None])[i],
+                'a': new_metadata.get('antigen_categories', ['unknown'])[i],
+                '_ingested': True,
+            })
+
+        update_task_state(task_id, TaskState.RUNNING, progress=0.9)
+        update_task_state(task_id, TaskState.COMPLETED, progress=1.0, result=f"Added {n_points} new TCRs (ephemeral overlay).")
     except Exception as exc:
-        logger.error("UMAP Transform error: %s", exc)
+        import traceback
+        tb = traceback.format_exc()
+        logger.error("UMAP Transform error: %s\n%s", exc, tb)
+        print(f"[UMAP-TRANSFORM] FAILED:\n{tb}", flush=True)
         update_task_state(task_id, TaskState.FAILED, error=str(exc))
 
-def start_umap_recompute():
+async def start_umap_recompute():
     task = create_task("UMAP Recompute")
-    # In asyncio, we must schedule it in the running loop
-    asyncio.create_task(_run_umap_recompute(task.task_id))
+    bg = asyncio.create_task(_run_umap_recompute(task.task_id))
+    _background.add(bg)
+    bg.add_done_callback(_background.discard)
     return task
 
-def start_umap_transform(new_embeddings, new_metadata):
+async def start_umap_transform(new_embeddings, new_metadata):
     task = create_task("UMAP Transform (Iterative)")
-    asyncio.create_task(_run_umap_transform(task.task_id, new_embeddings, new_metadata))
+    bg = asyncio.create_task(_run_umap_transform(task.task_id, new_embeddings, new_metadata))
+    _background.add(bg)
+    bg.add_done_callback(_background.discard)
     return task
 
 async def _run_ingest_pipeline(task_id: str, file_name: str, file_content: bytes):
+    """Ingest new TCRs by matching CDR3b to existing UMAP coordinates (no ESM-2/transform needed)."""
     import io
+    import math
     import pandas as pd
-    from core.esm_embed import embed_sequences
-    
+    from data.store import get_store
+
+    print(f"[INGEST] Pipeline STARTED for {file_name}", flush=True)
     update_task_state(task_id, TaskState.RUNNING, progress=0.1)
     try:
         content_str = file_content.decode('utf-8', errors='replace')
-        
+
         if file_name.endswith('.fasta') or file_name.endswith('.fa') or content_str.startswith(">"):
             lines = content_str.splitlines()
-            names = []
-            seqs = []
-            curr_name = "tcr_1"
-            curr_seq = []
+            names, seqs, curr_name, curr_seq = [], [], "tcr_1", []
             for line in lines:
                 if line.startswith(">"):
                     if curr_seq:
@@ -211,52 +210,90 @@ async def _run_ingest_pipeline(task_id: str, file_name: str, file_content: bytes
             if curr_seq:
                 seqs.append("".join(curr_seq))
                 names.append(curr_name)
-            
             df = pd.DataFrame({'tcr_id': names, 'CDR3b': seqs})
         else:
             df = pd.read_csv(io.StringIO(content_str))
-            
+
         if 'CDR3b' not in df.columns:
             if 'cdr3' in df.columns: df = df.rename(columns={'cdr3': 'CDR3b'})
             elif 'CDR3' in df.columns: df = df.rename(columns={'CDR3': 'CDR3b'})
             else:
                 raise Exception("CSV must contain a 'CDR3b' column")
-                
-        # Clean sequences
+
         import re
         VALID_AA = re.compile(r'^[ACDEFGHIKLMNPQRSTVWY]+$')
         df['CDR3b'] = df['CDR3b'].astype(str).str.upper().str.strip()
-        df = df[df['CDR3b'].str.match(VALID_AA)].copy()
-        df = df.reset_index(drop=True)
-        
-        seqs = df['CDR3b'].tolist()
-        if not seqs:
+        df = df[df['CDR3b'].str.match(VALID_AA)].copy().reset_index(drop=True)
+
+        if len(df) == 0:
             raise Exception("No valid CDR3b sequences found after filtering")
-            
-        update_task_state(task_id, TaskState.RUNNING, progress=0.2)
-        
-        # run embeddings on background thread
-        loop = asyncio.get_running_loop()
-        embeddings = await loop.run_in_executor(None, embed_sequences, seqs)
-        
-        update_task_state(task_id, TaskState.RUNNING, progress=0.5)
-        
-        metadata = {
-            'tcr_ids': df.get('tcr_id', [f"ingest_{file_name}_{i}" for i in range(len(df))]).tolist(),
-            'sources': df.get('source', ['user_upload'] * len(df)).tolist(),
-            'cdr3b': seqs,
-            'known_epitopes': df.get('known_epitope', [None] * len(df)).tolist(),
-            'antigen_categories': df.get('antigen_category', ['unknown'] * len(df)).tolist()
-        }
-        
-        # chain to umap transform
-        await _run_umap_transform(task_id, embeddings.tolist(), metadata)
-        
+
+        update_task_state(task_id, TaskState.RUNNING, progress=0.3)
+
+        # Look up UMAP coordinates by CDR3b match against existing dataset
+        store = get_store()
+        umap_df = store.umap_df
+        if umap_df.empty:
+            raise Exception("No UMAP data loaded — cannot match coordinates")
+
+        # Build CDR3b → coords lookup from existing data
+        cdr3_lookup = {}
+        for _, row in umap_df.iterrows():
+            cdr3 = row.get('CDR3b', '')
+            if cdr3 and cdr3 not in cdr3_lookup:
+                cdr3_lookup[cdr3] = row
+
+        update_task_state(task_id, TaskState.RUNNING, progress=0.6)
+
+        def _safe(v):
+            if v is None or (isinstance(v, float) and (math.isnan(v) or math.isinf(v))):
+                return None
+            return v
+
+        ingested = []
+        matched = 0
+        for _, row in df.iterrows():
+            cdr3 = row['CDR3b']
+            tcr_id = row.get('tcr_id', f"ingest_{file_name}_{len(ingested)}")
+            ref = cdr3_lookup.get(cdr3)
+            if ref is not None:
+                matched += 1
+                ingested.append({
+                    'id': str(tcr_id),
+                    'd1': float(ref.get('d1', 0)),
+                    'd2': float(ref.get('d2', 0)),
+                    'd3': float(ref.get('d3', 0)),
+                    'd4': float(ref.get('d4', 0)),
+                    'd5': float(ref.get('d5', 0)),
+                    'c': cdr3,
+                    's': _safe(row.get('source', 'user_upload')),
+                    'e': _safe(row.get('known_epitope')),
+                    'a': _safe(row.get('antigen_category', 'unknown')),
+                    '_ingested': True,
+                })
+            else:
+                print(f"[INGEST] No CDR3b match for {tcr_id} ({cdr3}) — skipping", flush=True)
+
+        store.ingested_points = ingested
+        print(f"[INGEST] Done: {matched}/{len(df)} matched, {len(df)-matched} unmatched", flush=True)
+
+        update_task_state(task_id, TaskState.COMPLETED, progress=1.0,
+                          result=f"Mapped {matched}/{len(df)} TCRs to UMAP coordinates.")
+
     except Exception as exc:
-        logger.error("Ingest pipeline error: %s", exc)
+        import traceback
+        tb = traceback.format_exc()
+        logger.error("Ingest pipeline error: %s\n%s", exc, tb)
+        print(f"[INGEST] FAILED:\n{tb}", flush=True)
         update_task_state(task_id, TaskState.FAILED, error=str(exc))
 
-def start_ingest_pipeline(file_name: str, file_content: bytes):
+async def start_ingest_pipeline(file_name: str, file_content: bytes):
     task = create_task(f"Ingest & Embed: {file_name}")
-    asyncio.create_task(_run_ingest_pipeline(task.task_id, file_name, file_content))
+    print(f"[INGEST] Creating background task for {file_name}, task_id={task.task_id}", flush=True)
+    loop = asyncio.get_running_loop()
+    print(f"[INGEST] Got event loop: {loop}", flush=True)
+    bg = asyncio.create_task(_run_ingest_pipeline(task.task_id, file_name, file_content))
+    _background.add(bg)
+    bg.add_done_callback(_background.discard)
+    print(f"[INGEST] Background task created: {bg}", flush=True)
     return task
