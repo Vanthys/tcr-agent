@@ -35,8 +35,8 @@
   --bg-overlay: #ffffff;
   --border: rgba(0, 0, 0, 0.06);
   --border-strong: rgba(0, 0, 0, 0.12);
-  --text-main: rgba(0, 0, 0, 0.85);
-  --text-dim: rgba(0, 0, 0, 0.45);
+  --text-main: #111827;
+  --text-dim: #4b5563;
 
   --color-primary: #1677ff;
   /* classic ant light primary or keep the teal? user said light theme, let's keep the teal for brand consistency or use a slightly darker version */
@@ -45,16 +45,16 @@
   --color-dim: rgba(0, 0, 0, 0.45);
   --color-muted: rgba(0, 0, 0, 0.1);
 
-  /* light theme category palette — slightly deeper for readability */
-  --cat-viral: #2c7a7b;
-  --cat-melanocyte: #c53030;
-  --cat-cancer: #9b2c2c;
-  --cat-autoimmune: #44337a;
-  --cat-bacterial: #b83280;
-  --cat-neurodegeneration: #d53f8c;
-  --cat-reactive: #c05621;
-  --cat-other: #4a5568;
-  --cat-unknown: #a0aec0;
+  /* light theme category palette — more vibrant for readability and pop */
+  --cat-viral: #14b8a6;
+  --cat-melanocyte: #ef4444;
+  --cat-cancer: #ec4899;
+  --cat-autoimmune: #8b5cf6;
+  --cat-bacterial: #0ea5e9;
+  --cat-neurodegeneration: #f97316;
+  --cat-reactive: #f43f5e;
+  --cat-other: #64748b;
+  --cat-unknown: #94a3b8;
 }
 
 *,
@@ -75,6 +75,7 @@ body,
   font-family: 'Inter', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 /* ── Scrollbars ──────────────────────────────────────────────────────────── */

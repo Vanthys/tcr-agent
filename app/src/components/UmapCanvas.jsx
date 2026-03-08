@@ -17,15 +17,15 @@ const CAT_COLORS_DARK = {
 }
 
 const CAT_COLORS_LIGHT = {
-    viral: [44, 122, 123],
-    melanocyte: [197, 48, 48],
-    cancer_associated: [155, 44, 44],
-    autoimmune: [68, 51, 122],
-    bacterial: [184, 50, 128],
-    neurodegeneration: [213, 63, 140],
-    reactive_unclassified: [192, 86, 33],
-    other: [74, 85, 104],
-    unknown: [160, 174, 192],
+    viral: [20, 184, 166],
+    melanocyte: [239, 68, 68],
+    cancer_associated: [236, 72, 153],
+    autoimmune: [139, 92, 246],
+    bacterial: [14, 165, 233],
+    neurodegeneration: [249, 115, 22],
+    reactive_unclassified: [244, 63, 94],
+    other: [100, 116, 139],
+    unknown: [148, 163, 184],
 }
 
 const SOURCE_LABELS = {
@@ -236,7 +236,7 @@ export default function UmapCanvas({ points, selectedId, filters, onSelect, isDa
                 onDragStart={onDragStart}
                 onDrag={onDrag}
                 onDragEnd={onDragEnd}
-                style={{ backgroundColor: isDark ? '#0a0c12' : '#f0f2f5' }}
+                style={{ backgroundColor: 'var(--bg-base)' }}
             >
             </DeckGL>
 

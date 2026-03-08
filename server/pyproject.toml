@@ -20,6 +20,7 @@ dependencies = [
     "aiosqlite>=0.22.1",
     "joblib>=1.5.3",
     "umap-learn>=0.5.11",
+    "python-multipart>=0.0.22",
 ]
 
 [build-system]

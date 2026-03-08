@@ -1,5 +1,6 @@
 import { createContext, useState, useContext, useEffect, useMemo } from 'react'
 import { createRoot } from 'react-dom/client'
+import { BrowserRouter } from 'react-router-dom'
 import { ConfigProvider, theme } from 'antd'
 import './index.css'
 import App from './App.jsx'
@@ -57,7 +58,9 @@ const ThemeProvider = ({ children }) => {
 }
 
 createRoot(document.getElementById('root')).render(
-  <ThemeProvider>
-    <App />
-  </ThemeProvider>
+  <BrowserRouter>
+    <ThemeProvider>
+      <App />
+    </ThemeProvider>
+  </BrowserRouter>
 )

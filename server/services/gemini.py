@@ -7,6 +7,7 @@ The router forwards these as SSE events directly to the browser.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import AsyncGenerator
 
@@ -17,22 +18,21 @@ logger = logging.getLogger(__name__)
 
 
 async def stream_annotation(
-    context: str,
+    full_context: str,
     question: str | None = None,
-) -> AsyncGenerator[str, None]:
+) -> AsyncGenerator[dict, None]:
     """
-    Yield text chunks from Gemini as they stream.
-    Each yielded value is a raw text delta (not yet SSE-formatted).
-    The router wraps these in SSE events.
+    Yield dicts representing SSE events containing text chunks from Gemini.
     """
     api_key = settings.gemini_api_key
     if not api_key:
-        yield "[error] GEMINI_API_KEY is not set on the server."
+        yield {"data": "[error] GEMINI_API_KEY is not set on the server."}
         return
 
     user_message = (
-        f"TCR Evidence Package:\n{context}\n\n"
-        f"Question: {question or 'Analyse this TCR and produce the structured hypothesis report.'}"
+        f"Investigate TCR using the provided context.\n"
+        f"Context:\n{full_context}\n\n"
+        f"Question: {question or 'Analyse this TCR and produce the structured hypothesis report. If the context is missing info, you can suggest tool calls.'}"
     )
 
     try:
@@ -41,6 +41,12 @@ async def stream_annotation(
 
         client = genai.Client(api_key=api_key)
         
+        # Signal UI that we are streaming synthesize text
+        yield {
+            "event": "step",
+            "data": json.dumps({"step": "synthesis", "action": "SYNTHESIZE", "label": "Gemini Synthesis", "provider": "gemini"})
+        }
+
         # We must use generate_content_stream for streaming tokens.
         # We configure the model with the system instruction.
         response = client.models.generate_content_stream(
@@ -57,8 +63,8 @@ async def stream_annotation(
         # However, FastAPI handles these nicely.
         for chunk in response:
             if chunk.text:
-                yield chunk.text
+                yield {"data": chunk.text}
 
     except Exception as exc:
         logger.error("Gemini streaming error: %s", exc)
-        yield f"\n[error] Gemini API error: {exc}"
+        yield {"data": f"\n[error] Gemini API error: {exc}"}

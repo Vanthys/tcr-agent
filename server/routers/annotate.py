@@ -15,8 +15,10 @@ since this is a POST).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+from pathlib import Path
 from typing import Optional
 
 import pandas as pd
@@ -24,10 +26,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
+from core.config import settings
 from data.store import DataStore, get_store
-from services import claude, gemini
-from services.neighbors import NeighborService
-from services.predictions import PredictionService
+from services import claude, gemini, tools
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["annotate"])
@@ -63,81 +64,87 @@ async def annotate(
     else:
         tcr_row = None
 
-    neighbor_svc = NeighborService(store)
-    pred_svc = PredictionService(store)
+    hero_path = settings.hero_dir / f"{request.tcr_id}.json"
+    if hero_path.exists():
+        async def _hero_event_generator():
+            try:
+                with open(hero_path) as f:
+                    hero_data = json.load(f)
+            except Exception as e:
+                logger.error("Failed to load hero file: %s", e)
+                hero_data = {}
+
+            logs_path = settings.hero_dir / "agent_reasoning_logs.json"
+            steps = []
+            if logs_path.exists():
+                try:
+                    with open(logs_path) as f:
+                        logs = json.load(f)
+                    if request.tcr_id in logs:
+                        steps = logs[request.tcr_id].get("steps", [])
+                except Exception as e:
+                    logger.error("Failed to load reasoning logs: %s", e)
+
+            for step_data in steps:
+                yield _step_event("legacy_step", step_data)
+                await asyncio.sleep(step_data.get("duration_ms", 1000) / 1000.0)
+
+            annotation = hero_data.get("annotation", "")
+            chunk_size = 15
+            for i in range(0, len(annotation), chunk_size):
+                yield {"data": annotation[i:i+chunk_size]}
+                await asyncio.sleep(0.03)
+
+            yield {"event": "done", "data": "{}"}
+
+        return EventSourceResponse(_hero_event_generator())
 
     async def event_generator():
-        context_parts: list[str] = []
+        tcr_metadata = _format_tcr_header(tcr_row, request.tcr_id) if tcr_row is not None else ""
+        executor = tools.ToolExecutor(store)
 
-        # ── Step 1: Neighbors ────────────────────────────────────────────────
-        yield _step_event("neighbors", {"tcr_id": request.tcr_id, "status": "searching"})
+        context_parts = [tcr_metadata]
 
-        neighbors = neighbor_svc.find_neighbors(request.tcr_id)
-        annotated = [n for n in neighbors if n.get("known_epitope")]
+        # 1. Explore (Neighbors)
+        yield _step_event("legacy_step", {"action": "EXPLORE", "label": "Neighbors", "detail": "Retrieving spatial nearest neighbors..."})
+        try:
+            n_res = executor.execute("search_neighbors", {"tcr_id": request.tcr_id, "k": 25})
+            context_parts.append(_format_neighbors(n_res.get("top_neighbors", [])))
+            await asyncio.sleep(0.1)
+        except Exception as e:
+            logger.error("Neighbor search failed: %s", e)
 
-        yield _step_event("neighbors", {
-            "neighbors": neighbors,
-            "annotated_count": len(annotated),
-            "summary": (
-                f"Found {len(neighbors)} nearest neighbors; "
-                f"{len(annotated)} have known epitope annotations."
-            ),
-        })
+        # 2. Score (Predictions)
+        yield _step_event("legacy_step", {"action": "SCORE", "label": "Predictions", "detail": "Retrieving binding predictions..."})
+        try:
+            p_res = executor.execute("get_predictions", {"tcr_id": request.tcr_id})
+            context_parts.append(_format_predictions(p_res.get("top_predictions", [])))
+            await asyncio.sleep(0.1)
+        except Exception as e:
+            logger.error("Prediction lookup failed: %s", e)
 
-        if neighbors:
-            context_parts.append(_format_neighbors(neighbors))
-
-        # ── Step 2: Predictions ──────────────────────────────────────────────
-        yield _step_event("predictions", {"tcr_id": request.tcr_id, "status": "scoring"})
-
-        predictions = pred_svc.get_predictions(request.tcr_id)
-        top_preds = predictions[:5] if predictions else []
-
-        yield _step_event("predictions", {
-            "predictions": predictions,
-            "top": top_preds,
-            "summary": (
-                f"Retrieved {len(predictions)} DecoderTCR scores. "
-                + (f"Top hit: {top_preds[0]['epitope_name']} ({top_preds[0]['interaction_score']:.4f})"
-                   if top_preds else "No scores available.")
-            ),
-        })
-
-        if predictions:
-            context_parts.append(_format_predictions(predictions[:10]))
-
-        # ── Step 3: Mutagenesis (optional) ──────────────────────────────────
-        mutagenesis = store.mutagenesis_cache.get(request.tcr_id)
-        if mutagenesis:
-            yield _step_event("mutagenesis", {
-                "available": True,
-                "epitope": mutagenesis.get("epitope"),
-                "wild_type_score": mutagenesis.get("wild_type_score"),
-                "top_variants": mutagenesis.get("top_variants", [])[:3],
-                "summary": f"Mutation landscape available for {mutagenesis.get('epitope', 'unknown epitope')}.",
-            })
-            context_parts.append(_format_mutagenesis(mutagenesis))
-        else:
-            yield _step_event("mutagenesis", {
-                "available": False,
-                "summary": "No pre-computed mutation landscape for this TCR.",
-            })
-
-        # ── TCR context ──────────────────────────────────────────────────────
-        if tcr_row is not None:
-            context_parts.insert(0, _format_tcr_header(tcr_row, request.tcr_id))
+        # 3. Engineer (Mutagenesis)
+        yield _step_event("legacy_step", {"action": "ENGINEER", "label": "Mutagenesis", "detail": "Retrieving CDR3 mutation landscape..."})
+        try:
+            m_res = executor.execute("get_mutagenesis", {"tcr_id": request.tcr_id})
+            if m_res.get("available"):
+                context_parts.append(_format_mutagenesis(m_res))
+            else:
+                context_parts.append("## Mutagenesis\nNo pre-computed mutation landscape exists for this TCR.")
+            await asyncio.sleep(0.1)
+        except Exception as e:
+            logger.error("Mutagenesis lookup failed: %s", e)
 
         full_context = "\n\n".join(context_parts)
 
-        # ── Step 4: LLM streaming synthesis ──────────────────────────────
-        yield _step_event("synthesis", {"status": "streaming", "provider": request.provider})
-
+        # 4. Synthesize (LLM generation)
         if request.provider == "gemini":
-            async for chunk in gemini.stream_annotation(full_context, request.question):
-                yield {"data": chunk}
+            provider_stream = gemini.stream_annotation(full_context=full_context, question=request.question)
         else:
-            async for chunk in claude.stream_annotation(full_context, request.question):
-                yield {"data": chunk}
+            provider_stream = claude.stream_annotation(full_context=full_context, question=request.question)
+
+        async for event_dict in provider_stream:
+            yield event_dict
 
         # Signal stream end
         yield {"event": "done", "data": "{}"}

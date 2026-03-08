@@ -54,7 +54,7 @@ async def lifespan(app: FastAPI):
     # ── Step 2: UMAP coordinates ──────────────────────────────────────────────
     store.umap_df = load_umap(
         settings.embed_dir / "umap_coords.csv",
-        mutagenesis_dir=settings.mutagenesis_dir
+        hero_dir=settings.hero_dir
     )
 
     # ── Step 3: DecoderTCR prediction scores (optional) ──────────────────────

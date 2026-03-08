@@ -182,7 +182,7 @@ export default function SidebarPanels({ stats: propStats }) {
 
 function PanelLabel({ children }) {
     return (
-        <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.55)' }}>
+        <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-dim)' }}>
             {children}
         </span>
     )
@@ -192,11 +192,11 @@ function Row({ label, value, color }) {
     return (
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span>{label}</span>
-            <span style={{ color: color ?? 'rgba(255,255,255,0.8)', fontWeight: 500 }}>{value}</span>
+            <span style={{ color: color ?? 'var(--text-main)', fontWeight: 500 }}>{value}</span>
         </div>
     )
 }
 
 function EmptyMsg() {
-    return <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>No data available</span>
+    return <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>No data available</span>
 }

@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     embed_dir_override: Path | None = Field(None, alias="embed_dir")
     pred_dir_override: Path | None = Field(None, alias="pred_dir")
     mutagenesis_dir_override: Path | None = Field(None, alias="mutagenesis_dir")
+    hero_dir_override: Path | None = Field(None, alias="hero_dir")
 
     @property
     def data_dir(self) -> Path:
@@ -51,6 +52,10 @@ class Settings(BaseSettings):
     @property
     def mutagenesis_dir(self) -> Path:
         return self.mutagenesis_dir_override or (self.pred_dir / "mutagenesis")
+
+    @property
+    def hero_dir(self) -> Path:
+        return self.hero_dir_override or (self.project_root / "data" / "hero")
 
     # ── Feature flags ─────────────────────────────────────────────────────────
     # Maximum points returned from /api/umap (client-side canvas handles 89K fine)

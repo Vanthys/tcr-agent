@@ -24,6 +24,14 @@ const STEP_META = {
     synthesis: { icon: <RobotOutlined />, label: 'Claude Synthesis', color: '#a29bfe' },
 }
 
+const LEGACY_ACTION_META = {
+    EXPLORE: { icon: <SearchOutlined />, color: '#4ecdc4' },
+    COMPARE: { icon: <SearchOutlined />, color: '#fd9644' },
+    SCORE: { icon: <ThunderboltOutlined />, color: '#e056fd' },
+    ENGINEER: { icon: <ExperimentOutlined />, color: '#c44569' },
+    SYNTHESIZE: { icon: <RobotOutlined />, color: '#a29bfe' },
+}
+
 export default function AgentLog({ tcrId, provider, onClose }) {
     const [lines, setLines] = useState([])       // {type, content}
     const [streaming, setStreaming] = useState(false)
@@ -49,6 +57,23 @@ export default function AgentLog({ tcrId, provider, onClose }) {
 
         abortRef.current = streamAnnotate(tcrId, null, provider, (type, data) => {
             if (type === 'step') {
+                if (data.step === 'legacy_step') {
+                    const baseMeta = LEGACY_ACTION_META[data.action] ?? { icon: <RobotOutlined />, color: '#a29bfe' }
+                    const meta = { ...baseMeta, label: data.label }
+
+                    appendLine({ type: 'step', step: data.step, meta, data })
+
+                    if (data.detail) {
+                        appendLine({ type: 'detail', content: `  → ${data.detail}` })
+                    }
+
+                    if (data.action === 'SYNTHESIZE' && !data.detail) {
+                        // wait for text stream
+                        appendLine({ type: 'claude-start' })
+                    }
+                    return
+                }
+
                 const meta = STEP_META[data.step] ?? {}
 
                 // Always emit the step header
@@ -114,7 +139,8 @@ export default function AgentLog({ tcrId, provider, onClose }) {
 
     // Auto-scroll
     useEffect(() => {
-        bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+        // High-frequency token streaming causes 'smooth' to stutter/jump if called continuously.
+        bottomRef.current?.scrollIntoView({ behavior: 'auto' })
     }, [lines, claudeText])
 
     return (
@@ -189,7 +215,7 @@ function LogLine({ line }) {
             <div className="log-line" style={{
                 display: 'flex', alignItems: 'center', gap: 8,
                 marginTop: 10, marginBottom: 4,
-                color: meta.color ?? '#fff',
+                color: meta.color ?? 'var(--text-main)',
                 fontWeight: 600, fontSize: 11, letterSpacing: '0.05em',
             }}>
                 <span style={{ fontSize: 14 }}>{meta.icon}</span>

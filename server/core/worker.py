@@ -89,7 +89,7 @@ async def _run_umap_recompute(task_id: str):
         update_task_state(task_id, TaskState.RUNNING, progress=0.9)
         store = get_store()
         umap_csv = embed_dir / "umap_coords.csv"
-        store.umap_df = load_umap(umap_csv)
+        store.umap_df = load_umap(umap_csv, hero_dir=settings.hero_dir)
         
         update_task_state(task_id, TaskState.COMPLETED, progress=1.0, result="UMAP recomputed with 5 dims successfully.")
     except Exception as exc:
@@ -166,7 +166,7 @@ async def _run_umap_transform(task_id: str, new_embeddings, new_metadata):
         # update DB via loader
         update_task_state(task_id, TaskState.RUNNING, progress=0.9)
         store = get_store()
-        store.umap_df = load_umap(new_umap_csv)
+        store.umap_df = load_umap(new_umap_csv, hero_dir=settings.hero_dir)
         
         update_task_state(task_id, TaskState.COMPLETED, progress=1.0, result=f"Added {n_points} new TCRs into 5D projection.")
     except Exception as exc:
@@ -182,4 +182,81 @@ def start_umap_recompute():
 def start_umap_transform(new_embeddings, new_metadata):
     task = create_task("UMAP Transform (Iterative)")
     asyncio.create_task(_run_umap_transform(task.task_id, new_embeddings, new_metadata))
+    return task
+
+async def _run_ingest_pipeline(task_id: str, file_name: str, file_content: bytes):
+    import io
+    import pandas as pd
+    from core.esm_embed import embed_sequences
+    
+    update_task_state(task_id, TaskState.RUNNING, progress=0.1)
+    try:
+        content_str = file_content.decode('utf-8', errors='replace')
+        
+        if file_name.endswith('.fasta') or file_name.endswith('.fa') or content_str.startswith(">"):
+            lines = content_str.splitlines()
+            names = []
+            seqs = []
+            curr_name = "tcr_1"
+            curr_seq = []
+            for line in lines:
+                if line.startswith(">"):
+                    if curr_seq:
+                        seqs.append("".join(curr_seq))
+                        names.append(curr_name)
+                    curr_name = line[1:].strip()
+                    curr_seq = []
+                else:
+                    curr_seq.append(line.strip())
+            if curr_seq:
+                seqs.append("".join(curr_seq))
+                names.append(curr_name)
+            
+            df = pd.DataFrame({'tcr_id': names, 'CDR3b': seqs})
+        else:
+            df = pd.read_csv(io.StringIO(content_str))
+            
+        if 'CDR3b' not in df.columns:
+            if 'cdr3' in df.columns: df = df.rename(columns={'cdr3': 'CDR3b'})
+            elif 'CDR3' in df.columns: df = df.rename(columns={'CDR3': 'CDR3b'})
+            else:
+                raise Exception("CSV must contain a 'CDR3b' column")
+                
+        # Clean sequences
+        import re
+        VALID_AA = re.compile(r'^[ACDEFGHIKLMNPQRSTVWY]+$')
+        df['CDR3b'] = df['CDR3b'].astype(str).str.upper().str.strip()
+        df = df[df['CDR3b'].str.match(VALID_AA)].copy()
+        df = df.reset_index(drop=True)
+        
+        seqs = df['CDR3b'].tolist()
+        if not seqs:
+            raise Exception("No valid CDR3b sequences found after filtering")
+            
+        update_task_state(task_id, TaskState.RUNNING, progress=0.2)
+        
+        # run embeddings on background thread
+        loop = asyncio.get_running_loop()
+        embeddings = await loop.run_in_executor(None, embed_sequences, seqs)
+        
+        update_task_state(task_id, TaskState.RUNNING, progress=0.5)
+        
+        metadata = {
+            'tcr_ids': df.get('tcr_id', [f"ingest_{file_name}_{i}" for i in range(len(df))]).tolist(),
+            'sources': df.get('source', ['user_upload'] * len(df)).tolist(),
+            'cdr3b': seqs,
+            'known_epitopes': df.get('known_epitope', [None] * len(df)).tolist(),
+            'antigen_categories': df.get('antigen_category', ['unknown'] * len(df)).tolist()
+        }
+        
+        # chain to umap transform
+        await _run_umap_transform(task_id, embeddings.tolist(), metadata)
+        
+    except Exception as exc:
+        logger.error("Ingest pipeline error: %s", exc)
+        update_task_state(task_id, TaskState.FAILED, error=str(exc))
+
+def start_ingest_pipeline(file_name: str, file_content: bytes):
+    task = create_task(f"Ingest & Embed: {file_name}")
+    asyncio.create_task(_run_ingest_pipeline(task.task_id, file_name, file_content))
     return task
