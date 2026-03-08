@@ -72,6 +72,11 @@ export const api = {
         return res.json()
     }),
     nullDistribution: (epitope) => get(`/api/null_distribution/${encodeURIComponent(epitope)}`),
+    getChatCacheStatus: (tcrId, provider = 'claude') =>
+        get(`/api/annotate/cache/${encodeURIComponent(tcrId)}`, { provider }),
+    listAllChats: () => get('/api/annotate/caches'),
+    clearChatCache: (tcrId, provider = 'claude') =>
+        fetch(`${BASE}/api/annotate/cache/${encodeURIComponent(tcrId)}?provider=${encodeURIComponent(provider)}`, { method: 'DELETE' }).then(r => r.json()),
 }
 
 // ── SSE annotate stream ───────────────────────────────────────────────────────
@@ -87,7 +92,7 @@ export const api = {
  *
  * Returns an AbortController so the caller can cancel.
  */
-export function streamAnnotate(tcrId, question, provider, onEvent) {
+export function streamAnnotate(tcrId, question, provider, onEvent, forceRefresh = false) {
     const controller = new AbortController()
 
         ; (async () => {
@@ -96,7 +101,7 @@ export function streamAnnotate(tcrId, question, provider, onEvent) {
                 res = await fetch(`${BASE}/api/annotate`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ tcr_id: tcrId, question, provider }),
+                    body: JSON.stringify({ tcr_id: tcrId, question, provider, force_refresh: forceRefresh }),
                     signal: controller.signal,
                 })
             } catch (err) {
@@ -135,12 +140,14 @@ export function streamAnnotate(tcrId, question, provider, onEvent) {
                                 try { onEvent('step', JSON.parse(payload)) } catch { /* skip */ }
                             } else if (eventType === 'text') {
                                 try { onEvent('text', JSON.parse(payload)) } catch { onEvent('text', payload) }
+                            } else if (eventType === 'cached') {
+                                try { onEvent('cached', JSON.parse(payload)) } catch { /* skip */ }
                             } else if (eventType === 'done') {
                                 onEvent('done', null)
                             } else if (eventType === 'error') {
                                 onEvent('error', payload)
                             } else {
-                                // Fallback (e.g. if eventType is "message")
+                                // Fallback
                                 onEvent('text', payload)
                             }
                             dataBuffer = []

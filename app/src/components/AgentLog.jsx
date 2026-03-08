@@ -2,7 +2,7 @@
  * AgentLog.jsx — The "wow" panel.
  */
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { Button, Spin, Modal, Collapse } from 'antd'
+import { Button, Spin, Modal, Collapse, Popconfirm, Tooltip } from 'antd'
 import {
     SearchOutlined,
     ThunderboltOutlined,
@@ -10,8 +10,10 @@ import {
     RobotOutlined,
     CloseOutlined,
     ExpandAltOutlined,
+    DeleteOutlined,
+    CheckCircleOutlined,
 } from '@ant-design/icons'
-import { streamAnnotate } from '../api'
+import { streamAnnotate, api } from '../api'
 import ReactMarkdown from 'react-markdown'
 
 const STEP_META = {
@@ -57,10 +59,14 @@ export default function AgentLog({ tcrId, provider, onClose }) {
     const [claudeText, setClaudeText] = useState('')
     const [done, setDone] = useState(false)
     const [isExpanded, setIsExpanded] = useState(false)
+    const [cachedAt, setCachedAt] = useState(null)
+    const [isClearing, setIsClearing] = useState(false)
+    const [refreshKey, setRefreshKey] = useState(0)   // increment to force re-stream
     const abortRef = useRef(null)
     const logBodyRef = useRef(null)
     const modalBodyRef = useRef(null)
-    const seenStepsRef = useRef(new Set()) // Track headers already shown
+    const seenStepsRef = useRef(new Set())
+    const forceRefreshRef = useRef(false)
 
     const appendLine = useCallback((line) => {
         setLines(prev => [...prev, line])
@@ -74,10 +80,12 @@ export default function AgentLog({ tcrId, provider, onClose }) {
         setClaudeText('')
         setDone(false)
         setStreaming(true)
+        setCachedAt(null)
         seenStepsRef.current = new Set()
 
         if (abortRef.current) abortRef.current.abort()
 
+        const isForceRefresh = forceRefreshRef.current
         abortRef.current = streamAnnotate(tcrId, null, provider, (type, data) => {
             if (type === 'step') {
                 // Determine if we need a new header
@@ -137,6 +145,9 @@ export default function AgentLog({ tcrId, provider, onClose }) {
             } else if (type === 'text') {
                 setClaudeText(prev => prev + data)
 
+            } else if (type === 'cached') {
+                setCachedAt(data?.cached_at ?? 'unknown')
+
             } else if (type === 'done') {
                 setStreaming(false)
                 setDone(true)
@@ -145,10 +156,11 @@ export default function AgentLog({ tcrId, provider, onClose }) {
                 appendLine({ type: 'error', content: String(data) })
                 setStreaming(false)
             }
-        })
+        }, isForceRefresh)
+        forceRefreshRef.current = false
 
         return () => { abortRef.current?.abort() }
-    }, [tcrId, provider, appendLine])
+    }, [tcrId, provider, appendLine, refreshKey])
 
     // Auto-scroll logic for both normal view and modal view
     useEffect(() => {
@@ -196,11 +208,43 @@ export default function AgentLog({ tcrId, provider, onClose }) {
                 </span>
                 {streaming && <Spin size="small" />}
 
+                {cachedAt && !streaming && (
+                    <Tooltip title={`Cached at ${new Date(cachedAt).toLocaleString()}`}>
+                        <span style={{
+                            fontSize: 10, color: '#2ecc71',
+                            display: 'flex', alignItems: 'center', gap: 3,
+                        }}>
+                            <CheckCircleOutlined /> cached
+                        </span>
+                    </Tooltip>
+                )}
+
                 <Button type="text" size="small" icon={<ExpandAltOutlined />}
                     onClick={() => setIsExpanded(true)}
                     style={{ color: 'var(--text-dim)' }}
                     title="Open in full modal"
                 />
+
+                <Popconfirm
+                    title="Clear cached analysis?"
+                    description="This will discard the saved result and run a fresh analysis."
+                    onConfirm={async () => {
+                        setIsClearing(true)
+                        try { await api.clearChatCache(tcrId, provider) } catch { /* ignore */ }
+                        forceRefreshRef.current = true
+                        setIsClearing(false)
+                        setRefreshKey(k => k + 1)   // triggers useEffect re-run with force_refresh=true
+                    }}
+                    okText="Yes, clear"
+                    cancelText="Cancel"
+                    okButtonProps={{ danger: true }}
+                >
+                    <Button type="text" size="small" icon={<DeleteOutlined />}
+                        loading={isClearing}
+                        style={{ color: 'var(--text-dim)' }}
+                        title="Clear cached analysis"
+                    />
+                </Popconfirm>
 
                 {onClose && (
                     <Button type="text" size="small" icon={<CloseOutlined />}

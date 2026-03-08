@@ -6,7 +6,7 @@ import './index.css'
 import App from './App.jsx'
 
 export const ThemeContext = createContext({
-  isDark: true,
+  isDark: false,
   toggle: () => { },
 })
 

@@ -27,6 +27,7 @@ from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from core.config import settings
+from data.db import save_chat, load_chat, clear_chat, list_all_chats
 from data.store import DataStore, get_store
 from services import claude, gemini, tools
 
@@ -38,6 +39,7 @@ class AnnotateRequest(BaseModel):
     tcr_id: str
     question: Optional[str] = None
     provider: str = "claude"
+    force_refresh: bool = False  # if True, skip cache
 
 
 @router.post("/annotate")
@@ -64,101 +66,127 @@ async def annotate(
     else:
         tcr_row = None
 
-    hero_path = settings.hero_dir / f"{request.tcr_id}.json"
-    if hero_path.exists():
-        async def _hero_event_generator():
-            try:
-                with open(hero_path) as f:
-                    hero_data = json.load(f)
-            except Exception as e:
-                logger.error("Failed to load hero file: %s", e)
-                hero_data = {}
 
-            logs_path = settings.hero_dir / "agent_reasoning_logs.json"
-            steps = []
-            if logs_path.exists():
-                try:
-                    with open(logs_path) as f:
-                        logs = json.load(f)
-                    if request.tcr_id in logs:
-                        steps = logs[request.tcr_id].get("steps", [])
-                except Exception as e:
-                    logger.error("Failed to load reasoning logs: %s", e)
 
-            for step_data in steps:
-                yield _step_event("legacy_step", step_data)
-                await asyncio.sleep(step_data.get("duration_ms", 1000) / 1000.0)
-
-            annotation = hero_data.get("annotation", "")
-            chunk_size = 15
-            for i in range(0, len(annotation), chunk_size):
-                yield {"event": "text", "data": json.dumps(annotation[i:i+chunk_size])}
-                await asyncio.sleep(0.03)
-
-            yield {"event": "done", "data": "{}"}
-
-        return EventSourceResponse(_hero_event_generator())
+    # ── Cache check (skip if force_refresh) ─────────────────────────────────
+    if not request.force_refresh:
+        cached = load_chat(request.tcr_id, request.provider)
+        if cached:
+            async def _cached_event_generator():
+                payload = cached["payload"]
+                # Instantly replay all steps — no artificial delay
+                for step in payload.get("steps", []):
+                    yield {"event": "step", "data": json.dumps(step)}
+                # Send full text in one shot — no chunking animation
+                text = payload.get("text", "")
+                if text:
+                    yield {"event": "text", "data": json.dumps(text)}
+                yield {"event": "cached", "data": json.dumps({"cached_at": cached["cached_at"]})}
+                yield {"event": "done", "data": "{}"}
+            return EventSourceResponse(_cached_event_generator())
 
     async def event_generator():
         tcr_metadata = _format_tcr_header(tcr_row, request.tcr_id) if tcr_row is not None else ""
         executor = tools.ToolExecutor(store)
 
         context_parts = [tcr_metadata]
+        # Accumulate steps for caching
+        accumulated_steps: list[dict] = []
+        accumulated_text: list[str] = []
+
+        def _track_step(step: str, data: dict) -> dict:
+            event = _step_event(step, data)
+            accumulated_steps.append({"step": step, **data})
+            return event
 
         # 1. Explore (Neighbors)
-        yield _step_event("neighbors", {"action": "EXPLORE", "label": "Neighbors", "detail": "Retrieving spatial nearest neighbors..."})
+        yield _track_step("neighbors", {"action": "EXPLORE", "label": "Neighbors", "detail": "Retrieving spatial nearest neighbors..."})
         try:
             n_res = executor.execute("search_neighbors", {"tcr_id": request.tcr_id, "k": 25})
             top_n = n_res.get("top_neighbors", [])
             context_parts.append(_format_neighbors(top_n))
-            # Yield results for the UI
-            yield _step_event("neighbors", {"neighbors": top_n, "summary": f"Found {len(top_n)} neighbors in the UMAP space."})
+            yield _track_step("neighbors", {"neighbors": top_n, "summary": f"Found {len(top_n)} neighbors in the UMAP space."})
             await asyncio.sleep(0.1)
         except Exception as e:
             logger.error("Neighbor search failed: %s", e)
 
         # 2. Score (Predictions)
-        yield _step_event("predictions", {"action": "SCORE", "label": "Predictions", "detail": "Retrieving binding predictions..."})
+        yield _track_step("predictions", {"action": "SCORE", "label": "Predictions", "detail": "Retrieving binding predictions..."})
         try:
             p_res = executor.execute("get_predictions", {"tcr_id": request.tcr_id})
             top_p = p_res.get("top_predictions", [])
             context_parts.append(_format_predictions(top_p))
-            # Yield results for the UI
-            yield _step_event("predictions", {"top": top_p, "summary": f"Identified {len(top_p)} potential epitopes."})
+            yield _track_step("predictions", {"top": top_p, "summary": f"Identified {len(top_p)} potential epitopes."})
             await asyncio.sleep(0.1)
         except Exception as e:
             logger.error("Prediction lookup failed: %s", e)
 
         # 3. Engineer (Mutagenesis)
-        yield _step_event("mutagenesis", {"action": "ENGINEER", "label": "Mutagenesis", "detail": "Checking for mutation landscape..."})
+        yield _track_step("mutagenesis", {"action": "ENGINEER", "label": "Mutagenesis", "detail": "Checking for mutation landscape..."})
         try:
             m_res = executor.execute("get_mutagenesis", {"tcr_id": request.tcr_id})
             if m_res.get("available"):
                 context_parts.append(_format_mutagenesis(m_res))
-                # Yield results for the UI
-                yield _step_event("mutagenesis", {**m_res, "summary": "Mutation landscape retrieved from cache."})
+                yield _track_step("mutagenesis", {**m_res, "summary": "Mutation landscape retrieved from cache."})
             else:
                 context_parts.append("## Mutagenesis\nNo pre-computed mutation landscape exists for this TCR.")
-                yield _step_event("mutagenesis", {"available": False, "summary": "No pre-computed landscape found."})
+                yield _track_step("mutagenesis", {"available": False, "summary": "No pre-computed landscape found."})
             await asyncio.sleep(0.1)
         except Exception as e:
             logger.error("Mutagenesis lookup failed: %s", e)
 
         full_context = "\n\n".join(context_parts)
 
-        # 4. Synthesize (LLM generation)
+        # 4. Synthesize (LLM generation) — accumulate text for caching
         if request.provider == "gemini":
             provider_stream = gemini.stream_annotation(full_context=full_context, question=request.question)
         else:
             provider_stream = claude.stream_annotation(full_context=full_context, question=request.question)
 
         async for event_dict in provider_stream:
+            # Extract text from JSON-encoded text events to accumulate for cache
+            if event_dict.get("event") == "text":
+                try:
+                    accumulated_text.append(json.loads(event_dict["data"]))
+                except Exception:
+                    pass
             yield event_dict
+
+        # Save completed session to cache
+        try:
+            save_chat(request.tcr_id, request.provider, {
+                "steps": accumulated_steps,
+                "text": "".join(accumulated_text),
+            })
+        except Exception as e:
+            logger.error("Failed to save chat cache: %s", e)
 
         # Signal stream end
         yield {"event": "done", "data": "{}"}
 
     return EventSourceResponse(event_generator())
+
+
+# ── Cache REST endpoints ─────────────────────────────────────────────────────────
+
+@router.get("/annotate/cache/{tcr_id}")
+def get_chat_cache_status(tcr_id: str, provider: str = "claude"):
+    cached = load_chat(tcr_id, provider)
+    if cached:
+        return {"cached": True, "cached_at": cached["cached_at"]}
+    return {"cached": False, "cached_at": None}
+
+
+@router.get("/annotate/caches")
+def get_all_chats():
+    """Return all cached sessions, newest first (no payload body)."""
+    return list_all_chats()
+
+
+@router.delete("/annotate/cache/{tcr_id}")
+def delete_chat_cache(tcr_id: str, provider: str = "claude"):
+    clear_chat(tcr_id, provider)
+    return {"ok": True}
 
 
 # ── Formatting helpers ────────────────────────────────────────────────────────

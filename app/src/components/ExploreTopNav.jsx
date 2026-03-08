@@ -13,6 +13,7 @@ import {
     MoonOutlined,
     SearchOutlined,
     SyncOutlined,
+    HistoryOutlined,
 } from '@ant-design/icons'
 
 const { Header } = Layout
@@ -114,14 +115,29 @@ export default function ExploreTopNav({
             </div>
 
             {/* Ingest navigation */}
-            <Button
-                type="primary"
-                size="small"
-                onClick={() => navigate('/ingest')}
-                style={{ background: 'var(--color-primary)', fontWeight: 600 }}
-            >
-                + Add TCRs
-            </Button>
+            <Tooltip title="Add new TCR Data" placement="bottom">
+
+                <Button
+                    type="primary"
+                    size="small"
+                    onClick={() => navigate('/ingest')}
+                    style={{ background: 'var(--color-primary)', fontWeight: 600 }}
+                >
+                    +
+                </Button>
+            </Tooltip>
+
+            {/* Past chats navigation */}
+            <Tooltip title="View past chats with agent" placement="bottom">
+
+                <Button
+                    size="small"
+                    icon={<HistoryOutlined />}
+                    onClick={() => navigate('/chats')}
+                    style={{ color: 'var(--text-dim)', borderColor: 'var(--border)' }}
+                >
+                </Button>
+            </Tooltip>
 
             {/* Filters */}
             <FilterOutlined style={{ color: 'var(--text-dim)', fontSize: 13 }} />
