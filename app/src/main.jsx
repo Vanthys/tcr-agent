@@ -11,10 +11,15 @@ export const ThemeContext = createContext({
 })
 
 const ThemeProvider = ({ children }) => {
-  const [isDark, setIsDark] = useState(true)
+  const [isDark, setIsDark] = useState(() => {
+    const saved = localStorage.getItem('tcr-theme')
+    return saved ? saved === 'dark' : true
+  })
 
   const toggle = () => {
-    setIsDark(!isDark)
+    const next = !isDark
+    setIsDark(next)
+    localStorage.setItem('tcr-theme', next ? 'dark' : 'light')
   }
 
   useEffect(() => {

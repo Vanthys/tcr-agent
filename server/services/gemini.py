@@ -63,7 +63,7 @@ async def stream_annotation(
         # However, FastAPI handles these nicely.
         for chunk in response:
             if chunk.text:
-                yield {"data": chunk.text}
+                yield {"event": "text", "data": json.dumps(chunk.text)}
 
     except Exception as exc:
         logger.error("Gemini streaming error: %s", exc)

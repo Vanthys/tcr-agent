@@ -92,7 +92,7 @@ async def annotate(
             annotation = hero_data.get("annotation", "")
             chunk_size = 15
             for i in range(0, len(annotation), chunk_size):
-                yield {"data": annotation[i:i+chunk_size]}
+                yield {"event": "text", "data": json.dumps(annotation[i:i+chunk_size])}
                 await asyncio.sleep(0.03)
 
             yield {"event": "done", "data": "{}"}
@@ -106,31 +106,40 @@ async def annotate(
         context_parts = [tcr_metadata]
 
         # 1. Explore (Neighbors)
-        yield _step_event("legacy_step", {"action": "EXPLORE", "label": "Neighbors", "detail": "Retrieving spatial nearest neighbors..."})
+        yield _step_event("neighbors", {"action": "EXPLORE", "label": "Neighbors", "detail": "Retrieving spatial nearest neighbors..."})
         try:
             n_res = executor.execute("search_neighbors", {"tcr_id": request.tcr_id, "k": 25})
-            context_parts.append(_format_neighbors(n_res.get("top_neighbors", [])))
+            top_n = n_res.get("top_neighbors", [])
+            context_parts.append(_format_neighbors(top_n))
+            # Yield results for the UI
+            yield _step_event("neighbors", {"neighbors": top_n, "summary": f"Found {len(top_n)} neighbors in the UMAP space."})
             await asyncio.sleep(0.1)
         except Exception as e:
             logger.error("Neighbor search failed: %s", e)
 
         # 2. Score (Predictions)
-        yield _step_event("legacy_step", {"action": "SCORE", "label": "Predictions", "detail": "Retrieving binding predictions..."})
+        yield _step_event("predictions", {"action": "SCORE", "label": "Predictions", "detail": "Retrieving binding predictions..."})
         try:
             p_res = executor.execute("get_predictions", {"tcr_id": request.tcr_id})
-            context_parts.append(_format_predictions(p_res.get("top_predictions", [])))
+            top_p = p_res.get("top_predictions", [])
+            context_parts.append(_format_predictions(top_p))
+            # Yield results for the UI
+            yield _step_event("predictions", {"top": top_p, "summary": f"Identified {len(top_p)} potential epitopes."})
             await asyncio.sleep(0.1)
         except Exception as e:
             logger.error("Prediction lookup failed: %s", e)
 
         # 3. Engineer (Mutagenesis)
-        yield _step_event("legacy_step", {"action": "ENGINEER", "label": "Mutagenesis", "detail": "Retrieving CDR3 mutation landscape..."})
+        yield _step_event("mutagenesis", {"action": "ENGINEER", "label": "Mutagenesis", "detail": "Checking for mutation landscape..."})
         try:
             m_res = executor.execute("get_mutagenesis", {"tcr_id": request.tcr_id})
             if m_res.get("available"):
                 context_parts.append(_format_mutagenesis(m_res))
+                # Yield results for the UI
+                yield _step_event("mutagenesis", {**m_res, "summary": "Mutation landscape retrieved from cache."})
             else:
                 context_parts.append("## Mutagenesis\nNo pre-computed mutation landscape exists for this TCR.")
+                yield _step_event("mutagenesis", {"available": False, "summary": "No pre-computed landscape found."})
             await asyncio.sleep(0.1)
         except Exception as e:
             logger.error("Mutagenesis lookup failed: %s", e)

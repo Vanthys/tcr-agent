@@ -112,7 +112,8 @@ export function streamAnnotate(tcrId, question, provider, onEvent) {
             const reader = res.body.getReader()
             const decoder = new TextDecoder()
             let buffer = ''
-            let lastEvent = 'message'
+            let dataBuffer = []
+            let eventType = 'message'
 
             while (true) {
                 const { done, value } = await reader.read()
@@ -122,22 +123,34 @@ export function streamAnnotate(tcrId, question, provider, onEvent) {
                 const lines = buffer.split('\n')
                 buffer = lines.pop() // keep incomplete last line
 
-                for (const line of lines) {
-                    if (line.startsWith('event:')) {
-                        lastEvent = line.slice(6).trim()
-                    } else if (line.startsWith('data:')) {
-                        const raw = line.slice(5).trim()
-                        if (lastEvent === 'step') {
-                            try { onEvent('step', JSON.parse(raw)) } catch { /* skip */ }
-                        } else if (lastEvent === 'done') {
-                            onEvent('done', null)
-                        } else if (lastEvent === 'error') {
-                            onEvent('error', raw)
-                        } else {
-                            // plain text delta from Claude
-                            onEvent('text', raw)
+                for (let i = 0; i < lines.length; i++) {
+                    let line = lines[i]
+                    if (line.endsWith('\r')) line = line.slice(0, -1) // handle Windows CRLF
+
+                    if (line === '') {
+                        // Empty line means dispatch the accumulated event
+                        if (dataBuffer.length > 0 || eventType === 'done') {
+                            const payload = dataBuffer.join('\n')
+                            if (eventType === 'step') {
+                                try { onEvent('step', JSON.parse(payload)) } catch { /* skip */ }
+                            } else if (eventType === 'text') {
+                                try { onEvent('text', JSON.parse(payload)) } catch { onEvent('text', payload) }
+                            } else if (eventType === 'done') {
+                                onEvent('done', null)
+                            } else if (eventType === 'error') {
+                                onEvent('error', payload)
+                            } else {
+                                // Fallback (e.g. if eventType is "message")
+                                onEvent('text', payload)
+                            }
+                            dataBuffer = []
                         }
-                        lastEvent = 'message' // reset after data line
+                        eventType = 'message'
+                    } else if (line.startsWith('event:')) {
+                        eventType = line.slice(6).trim()
+                    } else if (line.startsWith('data:')) {
+                        const raw = line.slice(5)
+                        dataBuffer.push(raw.startsWith(' ') ? raw.slice(1) : raw)
                     }
                 }
             }

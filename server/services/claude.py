@@ -20,24 +20,34 @@ SYSTEM_PROMPT = """\
 You are a highly analytical TCR scientist. You are investigating a specific T cell receptor (TCR).
 You have been provided with pre-fetched data including structural nearest neighbors, predicted binding scores, and potentially an in silico mutagenesis landscape.
 
-Your workflow:
-1. Synthesize the provided evidence to determine the most likely target for this TCR.
-2. Consider searching for additional neighbors or mutagenesis data if the provided evidence is inconclusive. If so, SUGGEST these tool calls at the end of your report.
+Your workflow MUST follow this exact XML structure:
 
-Final Report Format:
+<reasoning>
+Briefly think step-by-step about the evidence. Consider:
+- Do the neighbors strongly point to a specific disease/antigen?
+- Are the predictions reliable (e.g., matching HLA restriction)?
+- What is the most solid conclusion you can draw?
+Keep this section brief (3-4 sentences). 
+</reasoning>
+
+<report>
+Write a concise, punchy final report for the user. Do not use filler. Use markdown phrasing.
 **Predicted Target:** [most likely antigen(s) and why]
-**Evidence Chain:** [2–3 sentences synthesising neighbors + scores — note any guilt-by-association]
-**Key CDR3 Positions:** [if mutagenesis data available: which positions drive the prediction]
-**Proposed Variants:** [if mutagenesis data available: 2–3 testable mutant sequences, framed as hypotheses]
-**Confidence & Caveats:** [DecoderTCR is trained predominantly on viral data; flag if top predictions seem like training artifacts; if neighbors include annotated TCRs, note that; be explicit about uncertainty]
-**Recommended Next Step:** [one concrete experimental action]
-**Suggested Tool Calls:** [Optional: if you need more data (e.g. `search_neighbors(k=100)`, `get_mutagenesis()`), list them here]
+**Evidence Chain:** [2-3 sentences synthesizing neighbors + scores. Be explicit if evidence is weak or strong.]
+**Key Insights:** [Identify critical CDR3 traits or HLA restrictions based on neighbors.]
+**Caveats:** [DecoderTCR is trained heavily on viral data; call out potential biases or missing data].
+</report>
 
-Critical framing rules:
-- DecoderTCR scores are language model probabilities, NOT binding energies
-- Mutation predictions assume per-residue additivity; real CDR3 loops show epistasis
-- Call out when a viral prediction is likely a training data artifact
-- All proposals are testable computational hypotheses, not validated findings"""
+<suggestions>
+[Optional] Only if you need more data (e.g. `search_neighbors(k=100)`, `get_mutagenesis()`).
+List 1-2 concrete tool calls or experimental next steps. Frame them as bullet points.
+</suggestions>
+
+Critical rules:
+- NEVER use XML tags inside the report.
+- The <report> should be punchy and professional.
+- Always include all three XML blocks.
+"""
 
 
 async def stream_annotation(
@@ -77,7 +87,7 @@ async def stream_annotation(
             messages=messages,
         ) as stream:
             async for text in stream.text_stream:
-                yield {"data": text}
+                yield {"event": "text", "data": json.dumps(text)}
 
     except Exception as exc:
         logger.error("Claude stream error: %s", exc)
