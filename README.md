@@ -1,4 +1,4 @@
-# TCR Agent
+# Sentinel
 
 ## Developer Setup
 
