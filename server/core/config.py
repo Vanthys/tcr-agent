@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     gemini_api_key: str = ""
 
+    # Tamarind structure prediction dispatch
+    tamarind_api_base: str = ""
+    tamarind_api_key: str = ""
+    tamarind_workspace_id: str = ""
+
     # ── LLMs ───────────────────────────────────────────────────────────────
     claude_model: str = "claude-3-5-sonnet-latest"
     gemini_model: str = "gemini-2.5-flash"

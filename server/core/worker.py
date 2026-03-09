@@ -461,7 +461,7 @@ async def execute_suggestion_inline(tcr_id: str, provider: str, suggestion: dict
     from data.store import get_store
     from data.db import append_extra_context
     from services.tools import ToolExecutor
-    import httpx
+    from services.tamarind import TamarindClient
     import asyncio
 
     store = get_store()
@@ -507,6 +507,55 @@ async def execute_suggestion_inline(tcr_id: str, provider: str, suggestion: dict
                 )
             snippet = "\n".join(lines)
             
+        append_extra_context(tcr_id, provider, snippet)
+        return snippet
+
+    elif suggestion_type == "generate_structure_prediction":
+        df = store.tcr_db
+        if df.empty:
+            raise ValueError("TCR metadata is not loaded; cannot dispatch structure prediction.")
+        row = df[df["tcr_id"] == tcr_id]
+        if row.empty:
+            raise ValueError(f"TCR '{tcr_id}' not found; cannot dispatch structure prediction.")
+        record = row.iloc[0]
+        cdr3a = record.get("CDR3a") or record.get("cdr3a") or ""
+        cdr3b = record.get("CDR3b") or record.get("cdr3b") or ""
+
+        params = suggestion.get("params") or {}
+        req_models = params.get("models")
+        if isinstance(req_models, str):
+            models = [req_models]
+        elif isinstance(req_models, (list, tuple)):
+            models = [str(m) for m in req_models if m]
+        else:
+            models = ["Boltz2", "TCRModel2"]
+        workspace_override = params.get("workspace_id") or params.get("workspace")
+
+        metadata = {"source": "tcr-agent", "provider": provider}
+        extra_meta = params.get("metadata")
+        if isinstance(extra_meta, dict):
+            metadata.update(extra_meta)
+
+        client = TamarindClient.from_settings()
+        job = await client.submit_structure_prediction(
+            tcr_id=tcr_id,
+            cdr3a=cdr3a,
+            cdr3b=cdr3b,
+            models=models,
+            metadata=metadata,
+            workspace_id=workspace_override,
+        )
+
+        job_id = job.get("job_id") or job.get("id") or job.get("uuid") or "pending"
+        workspace = workspace_override or client.workspace_id or "not specified"
+        snippet = "\n".join([
+            "## Tamarind Structure Prediction",
+            f"TCR {tcr_id} dispatched to Tamarind ({', '.join(models)}).",
+            f"Workspace: {workspace}",
+            f"Job: {job_id}",
+            "Track progress in Tamarind; results will sync separately.",
+        ])
+
         append_extra_context(tcr_id, provider, snippet)
         return snippet
 

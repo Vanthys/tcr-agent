@@ -584,6 +584,7 @@ function LogLine({ line }) {
 const SUGGESTION_COLORS = {
     expand_neighbors: { bg: 'rgba(78,205,196,0.08)', border: 'rgba(78,205,196,0.3)', accent: '#4ecdc4' },
     compute_mutagenesis: { bg: 'rgba(196,69,105,0.08)', border: 'rgba(196,69,105,0.3)', accent: '#c44569' },
+    generate_structure_prediction: { bg: 'rgba(255,179,71,0.1)', border: 'rgba(255,179,71,0.35)', accent: '#ffb347' },
 }
 
 function SuggestionButtons({ suggestionsText, streaming, tcrId, provider, onJobStart, onJobDone, onJobError, onJobFullComplete }) {

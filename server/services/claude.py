@@ -50,9 +50,15 @@ If you recommend further investigation, output a JSON array. Each suggestion MUS
     "label": "Compute CDR3 mutation landscape for FLRGRAYGL",
     "reason": "This epitope has the highest predicted binding score. Mutagenesis would reveal which CDR3 positions are critical for specificity.",
     "params": {"epitope": "FLRGRAYGL"}
+  },
+  {
+    "type": "generate_structure_prediction",
+    "label": "Generate Boltz2/TCRModel2 structure prediction",
+    "reason": "Structural context would de-risk this hypothesis. Dispatch Tamarind's Boltz2/TCRModel2 job so we can inspect conformations.",
+    "params": {"models": ["Boltz2", "TCRModel2"]}
   }
 ]
-Supported types: expand_neighbors, compute_mutagenesis.
+Supported types: expand_neighbors, compute_mutagenesis, generate_structure_prediction (Tamarind Boltz2/TCRModel2 dispatch).
 If no further investigation is needed, output an empty array: []
 </suggestions>
 
